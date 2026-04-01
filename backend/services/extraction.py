@@ -17,7 +17,7 @@ from pathlib import Path
 
 from docling_surya import SuryaOcrOptions
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.chunking import HybridChunker
 from langchain_docling import DoclingLoader
@@ -27,31 +27,33 @@ from core.config import get_settings
 
 settings = get_settings()
 
-def _build_converter(enable_surya_ocr: bool = True) -> DocumentConverter:
-    """
-    Build a Docling converter.
+# ── Pipeline options (configured once) ────────────────────────────────
 
-    When Surya OCR is enabled, scanned/image PDFs are supported.
-    If the Surya stack is incompatible at runtime, callers can retry with OCR disabled.
-    """
-    if enable_surya_ocr:
-        pipeline_options = PdfPipelineOptions(
-            do_ocr=True,
-            ocr_model="suryaocr",
-            allow_external_plugins=True,
-            ocr_options=SuryaOcrOptions(lang=["en", "ar"]),
-        )
-    else:
-        pipeline_options = PdfPipelineOptions(
-            do_ocr=False,
-            allow_external_plugins=False,
-        )
+# Primary OCR pipeline (Surya)
+_pipeline_options = PdfPipelineOptions(
+    do_ocr=True,
+    ocr_model="suryaocr",
+    allow_external_plugins=True,
+    ocr_options=SuryaOcrOptions(lang=["en", "ar"]),
+)
 
-    format_options = {
-        InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
-        InputFormat.IMAGE: PdfFormatOption(pipeline_options=pipeline_options),
-    }
-    return DocumentConverter(format_options=format_options)
+_format_options = {
+    InputFormat.PDF: PdfFormatOption(pipeline_options=_pipeline_options),
+    InputFormat.IMAGE: PdfFormatOption(pipeline_options=_pipeline_options),
+}
+
+# Fallback OCR pipeline (RapidOCR) for Surya/runtime incompatibilities.
+_fallback_pipeline_options = PdfPipelineOptions(
+    do_ocr=True,
+    ocr_model="rapidocr",
+    allow_external_plugins=False,
+    ocr_options=RapidOcrOptions(lang=["en", "ar", "hi"]),
+)
+
+_fallback_format_options = {
+    InputFormat.PDF: PdfFormatOption(pipeline_options=_fallback_pipeline_options),
+    InputFormat.IMAGE: PdfFormatOption(pipeline_options=_fallback_pipeline_options),
+}
 
 
 def extract_and_chunk(
@@ -84,17 +86,16 @@ def extract_and_chunk(
         print(f"📄 Docling: parsing {filename} ...")
 
         # ── Step 1: Convert document ──────────────────────────────
-        converter = _build_converter(enable_surya_ocr=True)
+        converter = DocumentConverter(format_options=_format_options)
         try:
             result = converter.convert(tmp_path)
-        except AttributeError as e:
-            # Known dependency mismatch in some Surya/transformers combos:
-            # "'SuryaDecoderConfig' object has no attribute 'pad_token_id'".
-            # Fallback keeps ingestion working for digital PDFs by disabling OCR.
-            if "pad_token_id" not in str(e):
+        except AttributeError as exc:
+            # Known Surya/transformers incompatibility in some environments:
+            # "SuryaDecoderConfig has no attribute pad_token_id".
+            if "pad_token_id" not in str(exc):
                 raise
-            print("⚠️  Surya OCR initialization failed; retrying parse with OCR disabled")
-            converter = _build_converter(enable_surya_ocr=False)
+            print("⚠️  Surya OCR init failed; falling back to RapidOCR")
+            converter = DocumentConverter(format_options=_fallback_format_options)
             result = converter.convert(tmp_path)
 
         # Full markdown for language detection / summary

@@ -13,11 +13,12 @@ Handles all formats (PDF, DOCX, PPTX, images) with:
 
 import os
 import tempfile
+import json
 from pathlib import Path
 
 from docling_surya import SuryaOcrOptions
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.chunking import HybridChunker
 from langchain_docling import DoclingLoader
@@ -42,12 +43,13 @@ _format_options = {
     InputFormat.IMAGE: PdfFormatOption(pipeline_options=_pipeline_options),
 }
 
-# Fallback OCR pipeline (RapidOCR) for Surya/runtime incompatibilities.
+# Fallback OCR pipeline (Tesseract CLI) for Surya/runtime incompatibilities.
 _fallback_pipeline_options = PdfPipelineOptions(
     do_ocr=True,
-    ocr_model="rapidocr",
+    ocr_model="tesseractcli",
     allow_external_plugins=False,
-    ocr_options=RapidOcrOptions(lang=["en", "ar", "hi"]),
+    # Tesseract uses ISO-639-2 language codes.
+    ocr_options=TesseractCliOcrOptions(lang=["eng", "ara", "hin"]),
 )
 
 _fallback_format_options = {
@@ -55,16 +57,37 @@ _fallback_format_options = {
     InputFormat.IMAGE: PdfFormatOption(pipeline_options=_fallback_pipeline_options),
 }
 
-# Last-resort fallback for digital PDFs if OCR backends are unavailable.
-_no_ocr_pipeline_options = PdfPipelineOptions(
-    do_ocr=False,
-    allow_external_plugins=False,
-)
 
-_no_ocr_format_options = {
-    InputFormat.PDF: PdfFormatOption(pipeline_options=_no_ocr_pipeline_options),
-    InputFormat.IMAGE: PdfFormatOption(pipeline_options=_no_ocr_pipeline_options),
-}
+def _patch_surya_cached_config_if_needed() -> int:
+    """
+    Surya model config compatibility fix.
+
+    In some docling-surya/surya-ocr combinations, the decoder config loaded from
+    cache misses `decoder.pad_token_id`, which causes:
+      AttributeError: 'SuryaDecoderConfig' object has no attribute 'pad_token_id'
+
+    If top-level `pad_token_id` exists, copy it into `decoder.pad_token_id`.
+    Returns number of files patched.
+    """
+    base = Path.home() / ".cache" / "docling" / "models" / "SuryaOcr" / "text_recognition"
+    if not base.exists():
+        return 0
+
+    patched = 0
+    for cfg_path in sorted(base.glob("*/config.json")):
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            decoder = cfg.get("decoder")
+            top_level_pad = cfg.get("pad_token_id")
+            if isinstance(decoder, dict) and "pad_token_id" not in decoder and top_level_pad is not None:
+                decoder["pad_token_id"] = top_level_pad
+                cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                patched += 1
+        except Exception:
+            # Non-fatal: if patching fails, fallback path still handles extraction.
+            pass
+
+    return patched
 
 
 def extract_and_chunk(
@@ -96,6 +119,10 @@ def extract_and_chunk(
     try:
         print(f"📄 Docling: parsing {filename} ...")
 
+        patched_count = _patch_surya_cached_config_if_needed()
+        if patched_count:
+            print(f"🛠️  Patched Surya config in {patched_count} cached model file(s)")
+
         # ── Step 1: Convert document ──────────────────────────────
         converter = DocumentConverter(format_options=_format_options)
         try:
@@ -105,18 +132,9 @@ def extract_and_chunk(
             # "SuryaDecoderConfig has no attribute pad_token_id".
             if "pad_token_id" not in str(exc):
                 raise
-            print("⚠️  Surya OCR init failed; falling back to RapidOCR")
+            print("⚠️  Surya OCR init failed; falling back to Tesseract OCR")
             converter = DocumentConverter(format_options=_fallback_format_options)
-            try:
-                result = converter.convert(tmp_path)
-            except ImportError as rapid_exc:
-                # RapidOCR requires onnxruntime. If unavailable, continue without OCR
-                # so digitally readable PDFs still ingest successfully.
-                if "onnxruntime is not installed" not in str(rapid_exc):
-                    raise
-                print("⚠️  RapidOCR unavailable; retrying parse with OCR disabled")
-                converter = DocumentConverter(format_options=_no_ocr_format_options)
-                result = converter.convert(tmp_path)
+            result = converter.convert(tmp_path)
 
         # Full markdown for language detection / summary
         full_text = result.document.export_to_markdown()

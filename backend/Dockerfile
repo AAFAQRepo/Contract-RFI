@@ -1,5 +1,5 @@
-# Use Ubuntu 24.04 base to get Python 3.12 automatically
-FROM nvidia/cuda:12.4.1-runtime-ubuntu24.04
+# Use CUDA 12.6 on Ubuntu 24.04 (which provides Python 3.12)
+FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN ln -s /usr/bin/python3.12 /usr/bin/python && \
     ln -s /usr/bin/pip3 /usr/bin/pip
 
-# Install PyTorch specifically for CUDA 12.4
+# Install PyTorch specifically for CUDA 12.4+ (cu124 index works for 12.5/12.6 too)
 RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 # Install the rest of the requirements

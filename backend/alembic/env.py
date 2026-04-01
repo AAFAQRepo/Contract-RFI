@@ -15,7 +15,7 @@ from models.models import (
 )
 
 # Load database URL from environment variable if available
-DATABASE_URL = os.getenv("DATABASE_URL_SYNC", "postgresql://admin:changeme@localhost:5432/contract_rfi")
+DATABASE_URL = os.getenv("DATABASE_URL_SYNC", "postgresql://admin:changeme@postgres:5432/contract_rfi")
 
 config = context.config
 # Override the sqlalchemy.url in alembic.ini with the environment variable

@@ -5,8 +5,8 @@ FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONPATH=/app
-# Allow pip to install packages globally in the container (Ubuntu 24.04 requirement)
-ENV PIP_BREAK_SYSTEM_PACKAGES=1
+# Define the virtual environment path
+ENV VIRTUAL_ENV=/opt/venv
 
 WORKDIR /app
 
@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.12 \
     python3-pip \
     python3-dev \
+    python3-venv \
     build-essential \
     curl \
     libgl1 \
@@ -26,9 +27,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Ensure 'python' and 'pip' point to python3.12
-RUN ln -s /usr/bin/python3.12 /usr/bin/python && \
-    ln -s /usr/bin/pip3 /usr/bin/pip
+# Create and activate virtual environment
+RUN python3.12 -m venv $VIRTUAL_ENV
+# Add venv to PATH so 'python' and 'pip' use it automatically
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Upgrade pip inside the venv
+RUN pip install --no-cache-dir --upgrade pip
 
 # Install PyTorch specifically for CUDA 12.4+
 RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124

@@ -14,7 +14,9 @@ Handles all formats (PDF, DOCX, PPTX, images) with:
 import os
 import tempfile
 import json
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from docling_surya import SuryaOcrOptions
 from docling.datamodel.base_models import InputFormat
@@ -56,6 +58,172 @@ _fallback_format_options = {
     InputFormat.PDF: PdfFormatOption(pipeline_options=_fallback_pipeline_options),
     InputFormat.IMAGE: PdfFormatOption(pipeline_options=_fallback_pipeline_options),
 }
+
+# Fast path for digital PDFs: skip OCR entirely.
+_no_ocr_pipeline_options = PdfPipelineOptions(
+    do_ocr=False,
+    allow_external_plugins=False,
+)
+
+_no_ocr_format_options = {
+    InputFormat.PDF: PdfFormatOption(pipeline_options=_no_ocr_pipeline_options),
+}
+
+
+@dataclass
+class _ChunkDoc:
+    """Minimal document shape used by downstream embedding/storage code."""
+    page_content: str
+    metadata: dict
+
+
+def _get_page_count(result: Any) -> int:
+    """Extract page count from a docling ConversionResult."""
+    if hasattr(result.document, "pages") and result.document.pages:
+        return len(result.document.pages)
+    if hasattr(result, "pages"):
+        return len(result.pages)
+    return _estimate_page_count(result.document)
+
+
+def _should_enable_ocr(ext: str, full_text: str, page_count: int) -> bool:
+    """
+    Decide whether OCR is needed after a no-OCR parse.
+    Uses simple text-density heuristics for PDFs.
+    """
+    if ext != ".pdf":
+        return False
+
+    text_len = len((full_text or "").strip())
+    pages = max(page_count or 1, 1)
+    chars_per_page = text_len / pages
+
+    # Scanned PDFs often have very low extracted text density without OCR.
+    return text_len < 1200 or chars_per_page < 180
+
+
+def _to_dict_safe(value: Any) -> dict | None:
+    """Best-effort conversion of pydantic/dataclass-like objects to dict."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "model_dump"):
+        try:
+            return value.model_dump()
+        except Exception:
+            return None
+    if hasattr(value, "dict"):
+        try:
+            return value.dict()
+        except Exception:
+            return None
+    return None
+
+
+def _serialize_chunk(chunker: HybridChunker, chunk: Any) -> str:
+    """Serialize a Docling chunk to text with API compatibility fallbacks."""
+    try:
+        return chunker.serialize(chunk=chunk)
+    except TypeError:
+        pass
+
+    try:
+        return chunker.serialize(chunk)
+    except Exception:
+        pass
+
+    for attr in ("text", "content", "page_content"):
+        value = getattr(chunk, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value
+
+    return str(chunk)
+
+
+def _build_lc_docs_from_document(document: Any) -> list[_ChunkDoc]:
+    """
+    Build LangChain-like docs directly from an already-converted Docling document.
+    This avoids a second full conversion pass in DoclingLoader.
+    """
+    chunker = HybridChunker(
+        tokenizer=settings.EMBEDDING_MODEL,
+        max_tokens=512,  # multilingual-e5-large-instruct max sequence length
+    )
+
+    try:
+        chunks_iter = chunker.chunk(dl_doc=document)
+    except TypeError:
+        chunks_iter = chunker.chunk(document)
+
+    out: list[_ChunkDoc] = []
+    for chunk in chunks_iter:
+        text = _serialize_chunk(chunker, chunk).strip()
+        if not text:
+            continue
+
+        headings: list[str] = []
+        doc_items: list[dict] = []
+
+        meta = getattr(chunk, "meta", None)
+        if meta is not None:
+            raw_headings = getattr(meta, "headings", None) or []
+            headings = [str(h) for h in raw_headings if h]
+
+            raw_doc_items = getattr(meta, "doc_items", None) or []
+            for item in raw_doc_items:
+                item_dict = _to_dict_safe(item)
+                if item_dict:
+                    doc_items.append(item_dict)
+
+        out.append(
+            _ChunkDoc(
+                page_content=text,
+                metadata={"dl_meta": {"headings": headings, "doc_items": doc_items}},
+            )
+        )
+
+    return out
+
+
+def _convert_with_ocr(tmp_path: str):
+    """Convert document with OCR path (Surya preferred, Tesseract fallback)."""
+    patched_count = _patch_surya_cached_config_if_needed()
+    if patched_count:
+        print(f"🛠️  Patched Surya config in {patched_count} cached model file(s)")
+
+    converter = DocumentConverter(format_options=_format_options)
+    try:
+        result = converter.convert(tmp_path)
+        return result, converter
+    except AttributeError as exc:
+        # Known Surya/transformers incompatibility in some environments:
+        # "SuryaDecoderConfig has no attribute pad_token_id".
+        if "pad_token_id" not in str(exc):
+            raise
+
+        print("⚠️  Surya OCR init failed with pad_token_id error; attempting self-heal")
+        patched_after_failure = _patch_surya_cached_config_if_needed()
+
+        if patched_after_failure:
+            print(f"🛠️  Patched Surya config in {patched_after_failure} cached model file(s); retrying Surya")
+            converter = DocumentConverter(format_options=_format_options)
+            try:
+                result = converter.convert(tmp_path)
+                return result, converter
+            except AttributeError as exc_retry:
+                if "pad_token_id" not in str(exc_retry):
+                    raise
+
+                print("⚠️  Surya retry still failed; falling back to Tesseract OCR")
+                converter = DocumentConverter(format_options=_fallback_format_options)
+                result = converter.convert(tmp_path)
+                return result, converter
+
+        print("⚠️  No patchable Surya config found; falling back to Tesseract OCR")
+        converter = DocumentConverter(format_options=_fallback_format_options)
+        result = converter.convert(tmp_path)
+        return result, converter
 
 
 def _patch_surya_cached_config_if_needed() -> int:
@@ -116,70 +284,61 @@ def extract_and_chunk(
         tmp.write(file_bytes)
         tmp_path = tmp.name
 
+    full_text = ""
+    page_count = 0
+    converter = None
+
     try:
         print(f"📄 Docling: parsing {filename} ...")
 
-        patched_count = _patch_surya_cached_config_if_needed()
-        if patched_count:
-            print(f"🛠️  Patched Surya config in {patched_count} cached model file(s)")
-
-        # ── Step 1: Convert document ──────────────────────────────
-        converter = DocumentConverter(format_options=_format_options)
-        try:
+        # ── Step 1: Convert document (fast path first for PDFs) ───────────
+        if ext == ".pdf":
+            print("⚡ Fast path: trying PDF parse without OCR")
+            converter = DocumentConverter(format_options=_no_ocr_format_options)
             result = converter.convert(tmp_path)
-        except AttributeError as exc:
-            # Known Surya/transformers incompatibility in some environments:
-            # "SuryaDecoderConfig has no attribute pad_token_id".
-            if "pad_token_id" not in str(exc):
-                raise
-            print("⚠️  Surya OCR init failed with pad_token_id error; attempting self-heal")
-            patched_after_failure = _patch_surya_cached_config_if_needed()
+            full_text = result.document.export_to_markdown()
+            page_count = _get_page_count(result)
 
-            if patched_after_failure:
-                print(f"🛠️  Patched Surya config in {patched_after_failure} cached model file(s); retrying Surya")
-                converter = DocumentConverter(format_options=_format_options)
-                try:
-                    result = converter.convert(tmp_path)
-                except AttributeError as exc_retry:
-                    if "pad_token_id" not in str(exc_retry):
-                        raise
-                    print("⚠️  Surya retry still failed; falling back to Tesseract OCR")
-                    converter = DocumentConverter(format_options=_fallback_format_options)
-                    result = converter.convert(tmp_path)
+            if _should_enable_ocr(ext=ext, full_text=full_text, page_count=page_count):
+                print("🧾 Low native text density detected; enabling OCR path")
+                result, converter = _convert_with_ocr(tmp_path)
+                full_text = result.document.export_to_markdown()
+                page_count = _get_page_count(result)
             else:
-                print("⚠️  No patchable Surya config found; falling back to Tesseract OCR")
-                converter = DocumentConverter(format_options=_fallback_format_options)
-                result = converter.convert(tmp_path)
-
-        # Full markdown for language detection / summary
-        full_text = result.document.export_to_markdown()
-
-        # Count pages
-        page_count = 0
-        if hasattr(result.document, "pages") and result.document.pages:
-            page_count = len(result.document.pages)
-        elif hasattr(result, "pages"):
-            page_count = len(result.pages)
+                print("✅ Native PDF text sufficient; skipped OCR")
         else:
-            # Estimate from page references in the document
-            page_count = _estimate_page_count(result.document)
+            result, converter = _convert_with_ocr(tmp_path)
+            full_text = result.document.export_to_markdown()
+            page_count = _get_page_count(result)
 
         print(f"✅ Docling: parsed {page_count} pages, {len(full_text)} chars")
 
-        # ── Step 2: Chunk with HybridChunker via DoclingLoader ────
+        # ── Step 2: Chunk directly from conversion result (single pass) ────
+        lc_docs = _build_lc_docs_from_document(result.document)
+        if not lc_docs:
+            raise RuntimeError("No chunks produced from direct Docling chunking")
+        print(f"✂️  Docling: produced {len(lc_docs)} chunks")
+        return lc_docs, full_text, page_count
+    except Exception as chunk_err:
+        # Compatibility fallback: keep old path as a safety net.
+        print(f"⚠️  Direct chunking path failed ({chunk_err}); falling back to DoclingLoader")
+        if converter is None:
+            converter = DocumentConverter(format_options=_format_options)
         loader = DoclingLoader(
             file_path=tmp_path,
             export_type=ExportType.DOC_CHUNKS,
             converter=converter,
             chunker=HybridChunker(
                 tokenizer=settings.EMBEDDING_MODEL,
-                max_tokens=512,  # multilingual-e5-large-instruct max sequence length
+                max_tokens=512,
             ),
         )
         lc_docs = loader.load()
-
+        if not full_text:
+            full_text = "\n\n".join((doc.page_content or "") for doc in lc_docs).strip()
+        if page_count <= 0:
+            page_count = 1
         print(f"✂️  Docling: produced {len(lc_docs)} chunks")
-
         return lc_docs, full_text, page_count
 
     finally:

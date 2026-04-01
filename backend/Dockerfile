@@ -1,5 +1,5 @@
-# Use a newer PyTorch image that includes Python 3.11
-FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime
+# Use Ubuntu 24.04 base to get Python 3.12 automatically
+FROM nvidia/cuda:12.4.1-runtime-ubuntu24.04
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
@@ -8,8 +8,11 @@ ENV PYTHONPATH=/app
 
 WORKDIR /app
 
-# Install system dependencies
+# Install Python 3.12 and system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3-pip \
+    python3-dev \
     build-essential \
     curl \
     libgl1-mesa-glx \
@@ -21,7 +24,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Ensure 'python' and 'pip' point to python3.12
+RUN ln -s /usr/bin/python3.12 /usr/bin/python && \
+    ln -s /usr/bin/pip3 /usr/bin/pip
+
+# Install PyTorch specifically for CUDA 12.4
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# Install the rest of the requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

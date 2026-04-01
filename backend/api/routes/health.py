@@ -27,11 +27,16 @@ async def health_check():
     # Qdrant
     try:
         info = qdrant_client.get_collection(QDRANT_COLLECTION)
-        status["services"]["qdrant"] = {
+        qdrant_info = {
             "status": "connected",
             "collection": QDRANT_COLLECTION,
-            "vectors_count": info.vectors_count,
         }
+        # qdrant-client field names vary across versions
+        for field in ("vectors_count", "indexed_vectors_count", "points_count", "segments_count"):
+            value = getattr(info, field, None)
+            if value is not None:
+                qdrant_info[field] = value
+        status["services"]["qdrant"] = qdrant_info
     except Exception as e:
         status["services"]["qdrant"] = f"error: {str(e)}"
 

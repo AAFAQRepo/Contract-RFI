@@ -14,20 +14,20 @@ from models.models import (
     User, Document, Chunk, Review, Chat, QueryLog, CacheEntry,
 )
 
-# Load database URL from environment variable if available
-DATABASE_URL = os.getenv("DATABASE_URL_SYNC", "postgresql://admin:changeme@postgres:5432/contract_rfi")
+# Force the Docker address as the default fallback
+DATABASE_URL = os.getenv(
+    "DATABASE_URL_SYNC", 
+    "postgresql://admin:changeme@postgres:5432/contract_rfi"
+)
 
 config = context.config
-# Override the sqlalchemy.url in alembic.ini with the environment variable
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
-
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    url = DATABASE_URL
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -37,13 +37,13 @@ def run_migrations_offline() -> None:
     with context.begin_transaction():
         context.run_migrations()
 
-
 def run_migrations_online() -> None:
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    # Use create_engine directly with our DATABASE_URL
+    connectable = create_engine(
+        DATABASE_URL,
         poolclass=pool.NullPool,
     )
+
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
@@ -51,7 +51,6 @@ def run_migrations_online() -> None:
         )
         with context.begin_transaction():
             context.run_migrations()
-
 
 if context.is_offline_mode():
     run_migrations_offline()

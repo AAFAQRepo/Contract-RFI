@@ -1,19 +1,21 @@
 version: "3.9"
 
 services:
+  # Infrastructure
   postgres:
     image: postgres:15
     container_name: contract_rfi_postgres
+    restart: always
     environment:
-      POSTGRES_DB: contract_rfi
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: ${POSTGRES_DB:-contract_rfi}
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d contract_rfi"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-contract_rfi}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,6 +23,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: contract_rfi_redis
+    restart: always
     ports:
       - "6379:6379"
     healthcheck:
@@ -32,6 +35,7 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     container_name: contract_rfi_qdrant
+    restart: always
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -41,10 +45,11 @@ services:
   minio:
     image: minio/minio:latest
     container_name: contract_rfi_minio
+    restart: always
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -55,6 +60,79 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Application Services
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: contract_rfi_backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: contract_rfi_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: contract_rfi_worker
+    restart: always
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: contract_rfi_beat
+    restart: always
+    command: celery -A workers.celery_app beat --loglevel=info
+    depends_on:
+      - redis
+    env_file:
+      - .env
 
 volumes:
   pgdata:

@@ -55,6 +55,17 @@ _fallback_format_options = {
     InputFormat.IMAGE: PdfFormatOption(pipeline_options=_fallback_pipeline_options),
 }
 
+# Last-resort fallback for digital PDFs if OCR backends are unavailable.
+_no_ocr_pipeline_options = PdfPipelineOptions(
+    do_ocr=False,
+    allow_external_plugins=False,
+)
+
+_no_ocr_format_options = {
+    InputFormat.PDF: PdfFormatOption(pipeline_options=_no_ocr_pipeline_options),
+    InputFormat.IMAGE: PdfFormatOption(pipeline_options=_no_ocr_pipeline_options),
+}
+
 
 def extract_and_chunk(
     file_bytes: bytes,
@@ -96,7 +107,16 @@ def extract_and_chunk(
                 raise
             print("⚠️  Surya OCR init failed; falling back to RapidOCR")
             converter = DocumentConverter(format_options=_fallback_format_options)
-            result = converter.convert(tmp_path)
+            try:
+                result = converter.convert(tmp_path)
+            except ImportError as rapid_exc:
+                # RapidOCR requires onnxruntime. If unavailable, continue without OCR
+                # so digitally readable PDFs still ingest successfully.
+                if "onnxruntime is not installed" not in str(rapid_exc):
+                    raise
+                print("⚠️  RapidOCR unavailable; retrying parse with OCR disabled")
+                converter = DocumentConverter(format_options=_no_ocr_format_options)
+                result = converter.convert(tmp_path)
 
         # Full markdown for language detection / summary
         full_text = result.document.export_to_markdown()

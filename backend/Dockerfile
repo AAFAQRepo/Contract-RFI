@@ -1,10 +1,12 @@
-# Use CUDA 12.6 on Ubuntu 24.04 (which provides Python 3.12)
+# Use CUDA 12.6 on Ubuntu 24.04
 FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONPATH=/app
+# Allow pip to install packages globally in the container (Ubuntu 24.04 requirement)
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
 WORKDIR /app
 
@@ -15,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     build-essential \
     curl \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     poppler-utils \
     tesseract-ocr \
@@ -28,7 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN ln -s /usr/bin/python3.12 /usr/bin/python && \
     ln -s /usr/bin/pip3 /usr/bin/pip
 
-# Install PyTorch specifically for CUDA 12.4+ (cu124 index works for 12.5/12.6 too)
+# Install PyTorch specifically for CUDA 12.4+
 RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 # Install the rest of the requirements

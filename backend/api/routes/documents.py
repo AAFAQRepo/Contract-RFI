@@ -19,7 +19,7 @@ from services.storage import upload_document, build_object_name
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc"}
-MAX_FILE_SIZE_MB = 50
+MAX_FILE_SIZE_MB = 100
 
 
 @router.post("/upload")

@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     poppler-utils \
     tesseract-ocr \
+    tesseract-ocr-ara \
+    tesseract-ocr-hin \
     ffmpeg \
     git \
     libgomp1 \

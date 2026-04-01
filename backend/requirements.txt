@@ -22,14 +22,16 @@ minio>=7.2.0
 qdrant-client>=1.7.0
 
 # ── PDF / Text Extraction + OCR ──
-docling>=2.0.0
-langchain-docling>=0.1.0
-docling-surya>=0.1.0
-pymupdf>=1.24.0
+docling==2.81.0
+langchain-docling==2.0.0
+docling-surya==0.1.0
+surya-ocr==0.17.1
+pymupdf==1.27.2.2
 
 # ── Embedding + Reranking ──
-sentence-transformers>=3.0.0
-torch>=2.1.0
+sentence-transformers==5.3.0
+torch==2.10.0
+transformers==4.57.6
 
 # ── NLP Utilities ──
 langdetect>=1.0.9

@@ -132,9 +132,24 @@ def extract_and_chunk(
             # "SuryaDecoderConfig has no attribute pad_token_id".
             if "pad_token_id" not in str(exc):
                 raise
-            print("⚠️  Surya OCR init failed; falling back to Tesseract OCR")
-            converter = DocumentConverter(format_options=_fallback_format_options)
-            result = converter.convert(tmp_path)
+            print("⚠️  Surya OCR init failed with pad_token_id error; attempting self-heal")
+            patched_after_failure = _patch_surya_cached_config_if_needed()
+
+            if patched_after_failure:
+                print(f"🛠️  Patched Surya config in {patched_after_failure} cached model file(s); retrying Surya")
+                converter = DocumentConverter(format_options=_format_options)
+                try:
+                    result = converter.convert(tmp_path)
+                except AttributeError as exc_retry:
+                    if "pad_token_id" not in str(exc_retry):
+                        raise
+                    print("⚠️  Surya retry still failed; falling back to Tesseract OCR")
+                    converter = DocumentConverter(format_options=_fallback_format_options)
+                    result = converter.convert(tmp_path)
+            else:
+                print("⚠️  No patchable Surya config found; falling back to Tesseract OCR")
+                converter = DocumentConverter(format_options=_fallback_format_options)
+                result = converter.convert(tmp_path)
 
         # Full markdown for language detection / summary
         full_text = result.document.export_to_markdown()

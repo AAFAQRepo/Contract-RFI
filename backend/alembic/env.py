@@ -2,7 +2,7 @@ import sys
 import os
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
+from sqlalchemy import engine_from_config, create_engine
 from sqlalchemy import pool
 from alembic import context
 
@@ -14,13 +14,17 @@ from models.models import (
     User, Document, Chunk, Review, Chat, QueryLog, CacheEntry,
 )
 
+# Load database URL from environment variable if available
+DATABASE_URL = os.getenv("DATABASE_URL_SYNC", "postgresql://admin:changeme@localhost:5432/contract_rfi")
+
 config = context.config
+# Override the sqlalchemy.url in alembic.ini with the environment variable
+config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
-
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")

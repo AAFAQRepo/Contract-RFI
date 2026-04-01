@@ -27,19 +27,31 @@ from core.config import get_settings
 
 settings = get_settings()
 
-# ── Pipeline options (configured once) ────────────────────────────────
+def _build_converter(enable_surya_ocr: bool = True) -> DocumentConverter:
+    """
+    Build a Docling converter.
 
-_pipeline_options = PdfPipelineOptions(
-    do_ocr=True,
-    ocr_model="suryaocr",
-    allow_external_plugins=True,
-    ocr_options=SuryaOcrOptions(lang=["en", "ar"]),
-)
+    When Surya OCR is enabled, scanned/image PDFs are supported.
+    If the Surya stack is incompatible at runtime, callers can retry with OCR disabled.
+    """
+    if enable_surya_ocr:
+        pipeline_options = PdfPipelineOptions(
+            do_ocr=True,
+            ocr_model="suryaocr",
+            allow_external_plugins=True,
+            ocr_options=SuryaOcrOptions(lang=["en", "ar"]),
+        )
+    else:
+        pipeline_options = PdfPipelineOptions(
+            do_ocr=False,
+            allow_external_plugins=False,
+        )
 
-_format_options = {
-    InputFormat.PDF: PdfFormatOption(pipeline_options=_pipeline_options),
-    InputFormat.IMAGE: PdfFormatOption(pipeline_options=_pipeline_options),
-}
+    format_options = {
+        InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+        InputFormat.IMAGE: PdfFormatOption(pipeline_options=pipeline_options),
+    }
+    return DocumentConverter(format_options=format_options)
 
 
 def extract_and_chunk(
@@ -72,8 +84,18 @@ def extract_and_chunk(
         print(f"📄 Docling: parsing {filename} ...")
 
         # ── Step 1: Convert document ──────────────────────────────
-        converter = DocumentConverter(format_options=_format_options)
-        result = converter.convert(tmp_path)
+        converter = _build_converter(enable_surya_ocr=True)
+        try:
+            result = converter.convert(tmp_path)
+        except AttributeError as e:
+            # Known dependency mismatch in some Surya/transformers combos:
+            # "'SuryaDecoderConfig' object has no attribute 'pad_token_id'".
+            # Fallback keeps ingestion working for digital PDFs by disabling OCR.
+            if "pad_token_id" not in str(e):
+                raise
+            print("⚠️  Surya OCR initialization failed; retrying parse with OCR disabled")
+            converter = _build_converter(enable_surya_ocr=False)
+            result = converter.convert(tmp_path)
 
         # Full markdown for language detection / summary
         full_text = result.document.export_to_markdown()

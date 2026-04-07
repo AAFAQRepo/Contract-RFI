@@ -9,16 +9,14 @@ from alembic import context
 # Add backend directory to path so models can be imported
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core.config import get_settings
 from core.database import Base
 from models.models import (
     User, Document, Chunk, Review, Chat, QueryLog, CacheEntry,
 )
 
-# Force the Docker address as the default fallback
-DATABASE_URL = os.getenv(
-    "DATABASE_URL_SYNC", 
-    "postgresql://admin:changeme@postgres:5432/contract_rfi"
-)
+settings = get_settings()
+DATABASE_URL = settings.DATABASE_URL_SYNC
 
 config = context.config
 if config.config_file_name is not None:

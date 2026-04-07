@@ -15,6 +15,7 @@ from core.database import get_db
 from core.auth import get_current_user
 from models.models import Document, Chunk, User
 from services.storage import upload_document, build_object_name
+from services.extraction import extract_and_chunk
 
 router = APIRouter()
 
@@ -211,3 +212,31 @@ async def delete_document(
     await db.commit()
 
     return {"message": f"Document {doc_id} deleted successfully"}
+
+
+@router.post("/extract")
+async def extract_document_endpoint(
+    file: UploadFile = File(...),
+):
+    """
+    Direct extraction endpoint — used by local machine to offload OCR to GPU server.
+    Accepts a file, returns Markdown text and chunks.
+    """
+    file_bytes = await file.read()
+    
+    # Run the heavy Docling + Surya extraction
+    lc_docs, full_text, page_count = extract_and_chunk(
+        file_bytes=file_bytes, 
+        filename=file.filename
+    )
+    
+    # Serialize for JSON response
+    return {
+        "lc_docs": [
+            {"page_content": d.page_content, "metadata": d.metadata}
+            for d in lc_docs
+        ],
+        "full_text": full_text,
+        "page_count": page_count,
+    }
+

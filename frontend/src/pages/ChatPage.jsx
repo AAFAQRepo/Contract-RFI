@@ -11,10 +11,38 @@ function DocIcon({ name = '' }) {
   return <div className="file-card-icon" style={{ background: bg }}>{label}</div>
 }
 
+/* ── Progress Ring ───────────────────────────────────────────── */
+function ProgressRing({ percent = 0, size = 16, stroke = 2 }) {
+  const radius = (size - stroke) / 2
+  const circ = 2 * Math.PI * radius
+  const offset = circ - (percent / 100) * circ
+  return (
+    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+      <circle cx={size/2} cy={size/2} r={radius} fill="transparent" stroke="rgba(255,255,255,0.2)" strokeWidth={stroke} />
+      <circle cx={size/2} cy={size/2} r={radius} fill="transparent" stroke="currentColor" strokeWidth={stroke} strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 0.3s ease' }} />
+    </svg>
+  )
+}
+
 /* ── Status Badge ──────────────────────────────────────────── */
-const STATUS_MAP = { uploading: ['Uploading', 'badge-uploading'], processing: ['Processing', 'badge-processing'], ready: ['Ready', 'badge-ready'], error: ['Error', 'badge-error'] }
-function StatusBadge({ status }) {
+const STATUS_MAP = { 
+  uploading: ['Uploading', 'badge-uploading'], 
+  processing: ['Processing', 'badge-processing'], 
+  ready: ['Ready', 'badge-ready'], 
+  error: ['Error', 'badge-error'] 
+}
+function StatusBadge({ status, step, progress }) {
   const [label, cls] = STATUS_MAP[status] || [status, '']
+  
+  if (status === 'processing') {
+    return (
+      <span className={`badge ${cls}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <ProgressRing percent={progress || 0} />
+        <span>{step || label} {progress ? `${progress}%` : ''}</span>
+      </span>
+    )
+  }
+  
   return <span className={`badge ${cls}`}>{label}</span>
 }
 
@@ -47,7 +75,7 @@ function FilesPanel({ files, onUpload, onUploadClick, uploading, dragOver, setDr
             <DocIcon name={f.filename} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="file-card-name">{f.filename}</div>
-              <div style={{ marginTop: 4 }}><StatusBadge status={f.status} /></div>
+              <div style={{ marginTop: 4 }}><StatusBadge status={f.status} step={f.processing_step} progress={f.progress_percent} /></div>
             </div>
             <button
               className="file-card-delete-btn"
@@ -196,23 +224,29 @@ function getGreeting() {
 function ChatInput({ 
   input, setInput, onSend, onUploadClick, 
   pendingFiles, onRemoveFile, sending, 
+  disabled=false,
   placeholder="Ask Spellbook to edit, review, or summarize legal documents",
   idPrefix="home"
 }) {
   const textareaRef = useRef(null)
 
+  const effectivePlaceholder = disabled 
+    ? "Waiting for documents to process..." 
+    : placeholder
+
   const handleInputChange = e => {
+    if (disabled) return
     setInput(e.target.value)
     const ta = textareaRef.current
     if (ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 160) + 'px' }
   }
 
   const handleKeyDown = e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend() }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!disabled) onSend() }
   }
 
   return (
-    <div className="chat-input-box">
+    <div className={`chat-input-box ${disabled ? 'disabled' : ''}`}>
       {pendingFiles.length > 0 && (
         <div className="file-chips-container">
           {pendingFiles.map(f => (
@@ -223,22 +257,23 @@ function ChatInput({
       <textarea
         ref={textareaRef}
         className="chat-input-textarea"
-        placeholder={placeholder}
+        placeholder={effectivePlaceholder}
         value={input}
         onChange={handleInputChange}
         onKeyDown={handleKeyDown}
         rows={1}
+        disabled={disabled}
         id={`${idPrefix}-input`}
       />
       <div className="chat-input-actions chat-input-actions--simple">
-        <button className="input-action-btn" id={`${idPrefix}-add-files-btn`} onClick={onUploadClick}>
+        <button className="input-action-btn" id={`${idPrefix}-add-files-btn`} onClick={onUploadClick} disabled={sending}>
           <Icon.Attach /> Add files
         </button>
         <div style={{ flex: 1 }} />
         <button
-          className={`input-send-btn ${(input.trim() || pendingFiles.length > 0) && !sending ? 'active' : ''}`}
+          className={`input-send-btn ${(input.trim() || pendingFiles.length > 0) && !sending && !disabled ? 'active' : ''}`}
           onClick={onSend}
-          disabled={(!input.trim() && pendingFiles.length === 0) || sending}
+          disabled={(!input.trim() && pendingFiles.length === 0) || sending || disabled}
           id={`${idPrefix}-send-btn`}
         >
           <Icon.Send />
@@ -249,7 +284,7 @@ function ChatInput({
 }
 
 /* ── Home Screen component ───────────────────────────────────── */
-function HomeScreen({ input, setInput, onSend, onUploadClick, pendingFiles, onRemoveFile, sending }) {
+function HomeScreen({ input, setInput, onSend, onUploadClick, pendingFiles, onRemoveFile, sending, disabled }) {
   return (
     <div className="main-area">
       <div className="home-screen">
@@ -264,6 +299,7 @@ function HomeScreen({ input, setInput, onSend, onUploadClick, pendingFiles, onRe
             pendingFiles={pendingFiles}
             onRemoveFile={onRemoveFile}
             sending={sending}
+            disabled={disabled}
             idPrefix="home"
           />
         </div>
@@ -398,6 +434,8 @@ export default function ChatPage({ project, setProject, projects, setProjects })
   }
 
   const triggerFileUpload = () => fileInputRef.current?.click()
+  
+  const isProcessing = files.some(f => f.status === 'processing' || f.status === 'uploading')
 
   // ── Home screen (project=null) ──
   if (!project) {
@@ -413,6 +451,7 @@ export default function ChatPage({ project, setProject, projects, setProjects })
           pendingFiles={pendingFiles}
           onRemoveFile={removePendingFile}
           sending={sending}
+          disabled={isProcessing}
         />
         {showFiles && (
           <FilesPanel
@@ -492,6 +531,7 @@ export default function ChatPage({ project, setProject, projects, setProjects })
             pendingFiles={pendingFiles}
             onRemoveFile={removePendingFile}
             sending={sending}
+            disabled={isProcessing}
             idPrefix="chat"
           />
         </div>

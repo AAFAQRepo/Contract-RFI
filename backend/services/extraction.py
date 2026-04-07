@@ -12,7 +12,6 @@ Handles all formats (PDF, DOCX, PPTX, images) with:
 """
 
 import os
-import httpx
 import tempfile
 import json
 from dataclasses import dataclass
@@ -259,33 +258,6 @@ def _patch_surya_cached_config_if_needed() -> int:
     return patched
 
 
-def _extract_remotely(file_bytes: bytes, filename: str) -> tuple[list, str, int]:
-    """
-    Offload extraction to a remote GPU server via its /extract endpoint.
-    Returns (lc_docs, full_text, page_count).
-    """
-    url = f"http://{settings.GPU_SERVER_IP}:8000/api/documents/extract"
-    print(f"🚀 Offloading {filename} to GPU server at {url}...")
-    
-    try:
-        files = {"file": (filename, file_bytes)}
-        # Set a long timeout for heavy OCR tasks
-        with httpx.Client(timeout=600.0) as client:
-            response = client.post(url, files=files)
-            response.raise_for_status()
-            data = response.json()
-            
-            # Reconstruct _ChunkDoc objects
-            lc_docs = [
-                _ChunkDoc(page_content=d["page_content"], metadata=d["metadata"])
-                for d in data["lc_docs"]
-            ]
-            return lc_docs, data["full_text"], data["page_count"]
-    except Exception as e:
-        print(f"❌ Remote extraction failed for {filename}: {e}")
-        raise
-
-
 def extract_and_chunk(
     file_bytes: bytes,
     filename: str,
@@ -315,13 +287,6 @@ def extract_and_chunk(
     full_text = ""
     page_count = 0
     converter = None
-
-    # ── Step 0: Remote GPU Offloading ──────────────────────────────────────
-    if settings.USE_GPU_SERVER and settings.GPU_SERVER_IP:
-        try:
-            return _extract_remotely(file_bytes, filename)
-        except Exception:
-            print("⚠️  Falling back to local extraction due to remote error.")
 
     try:
         print(f"📄 Docling: parsing {filename} ...")

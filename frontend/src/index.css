@@ -375,6 +375,19 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   background: #fff;
   display: flex;
   flex-direction: column;
+  transition: all 0.2s ease;
+}
+.chat-input-box.disabled {
+  background: #fcfcfc;
+  border-color: var(--border);
+}
+.chat-input-box.disabled .chat-input-textarea {
+  cursor: not-allowed;
+  color: var(--text-muted);
+}
+.chat-input-box.disabled .input-action-btn {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .file-chips-container {
   display: flex;

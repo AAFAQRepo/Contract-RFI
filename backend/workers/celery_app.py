@@ -68,10 +68,14 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
     engine = create_engine(settings.DATABASE_URL_SYNC)
     Session = sessionmaker(bind=engine)
 
-    def _update_status(session, status: str, error: str = None):
+    def _update_status(session, status: str, step: str = None, progress: int = None, error: str = None):
         doc = session.get(Document, document_id)
         if doc:
             doc.status = status
+            if step:
+                doc.processing_step = step
+            if progress is not None:
+                doc.progress_percent = progress
             if error:
                 doc.error_message = error
             session.commit()
@@ -79,15 +83,17 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
     session = Session()
     try:
         print(f"⏳ Processing document {document_id}")
-        _update_status(session, "processing")
+        _update_status(session, "processing", step="Downloading", progress=10)
 
         # 1. Download from MinIO
         print(f"⬇️  Downloading {object_name}")
         file_bytes = download_document(object_name)
+        _update_status(session, "processing", step="Extracting text", progress=30)
 
         # 2. Extract + chunk with Docling (single call!)
         print(f"📄 Extracting and chunking {filename}")
         lc_docs, full_text, page_count = extract_and_chunk(file_bytes, filename)
+        _update_status(session, "processing", step="Detecting language", progress=50)
 
         # 3. Detect language
         language = detect_language(full_text)
@@ -99,10 +105,13 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
             doc.language = language
             doc.page_count = page_count
             session.commit()
+        
+        _update_status(session, "processing", step="Embedding chunks", progress=70)
 
         # 5. Embed + store chunks in Qdrant
         print(f"🔢 Embedding {len(lc_docs)} chunks...")
         point_ids = store_docling_chunks_in_qdrant(lc_docs, document_id, user_id, language)
+        _update_status(session, "processing", step="Saving to database", progress=90)
 
         # 6. Store chunks in PostgreSQL for reference
         print(f"💾 Storing {len(lc_docs)} chunks in database...")
@@ -140,7 +149,7 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
         session.add_all(db_chunks)
 
         # 7. Mark as ready
-        _update_status(session, "ready")
+        _update_status(session, "ready", step="Completed", progress=100)
         session.commit()
 
         print(f"✅ Document {document_id} processed successfully")

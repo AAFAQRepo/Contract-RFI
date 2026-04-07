@@ -40,6 +40,8 @@ class Document(Base):
     language = Column(String, nullable=True)     # en, ar, hi, mixed
     contract_type = Column(String, nullable=True)
     status = Column(String, nullable=False, default="uploading")  # uploading, processing, ready, error
+    processing_step = Column(String, nullable=True)               # e.g. "Downloading", "OCR-ing", "Embedding"
+    progress_percent = Column(Integer, nullable=True, default=0)
     error_message = Column(Text, nullable=True)
     page_count = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

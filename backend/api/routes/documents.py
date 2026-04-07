@@ -15,7 +15,6 @@ from core.database import get_db
 from core.auth import get_current_user
 from models.models import Document, Chunk, User
 from services.storage import upload_document, build_object_name
-from services.extraction import extract_and_chunk
 
 router = APIRouter()
 
@@ -111,6 +110,8 @@ async def list_documents(
                 "id": str(d.id),
                 "filename": d.filename,
                 "status": d.status,
+                "processing_step": d.processing_step,
+                "progress_percent": d.progress_percent,
                 "language": d.language,
                 "page_count": d.page_count,
                 "size_mb": round((d.file_size_bytes or 0) / (1024 * 1024), 2),
@@ -131,6 +132,8 @@ async def get_document(doc_id: str, db: AsyncSession = Depends(get_db)):
         "id": str(doc.id),
         "filename": doc.filename,
         "status": doc.status,
+        "processing_step": doc.processing_step,
+        "progress_percent": doc.progress_percent,
         "language": doc.language,
         "contract_type": doc.contract_type,
         "page_count": doc.page_count,
@@ -161,6 +164,8 @@ async def get_document_status(doc_id: str, db: AsyncSession = Depends(get_db)):
     return {
         "document_id": doc_id,
         "status": doc.status,
+        "processing_step": doc.processing_step,
+        "progress_percent": doc.progress_percent,
         "language": doc.language,
         "page_count": doc.page_count,
         "error_message": doc.error_message,
@@ -212,31 +217,3 @@ async def delete_document(
     await db.commit()
 
     return {"message": f"Document {doc_id} deleted successfully"}
-
-
-@router.post("/extract")
-async def extract_document_endpoint(
-    file: UploadFile = File(...),
-):
-    """
-    Direct extraction endpoint — used by local machine to offload OCR to GPU server.
-    Accepts a file, returns Markdown text and chunks.
-    """
-    file_bytes = await file.read()
-    
-    # Run the heavy Docling + Surya extraction
-    lc_docs, full_text, page_count = extract_and_chunk(
-        file_bytes=file_bytes, 
-        filename=file.filename
-    )
-    
-    # Serialize for JSON response
-    return {
-        "lc_docs": [
-            {"page_content": d.page_content, "metadata": d.metadata}
-            for d in lc_docs
-        ],
-        "full_text": full_text,
-        "page_count": page_count,
-    }
-

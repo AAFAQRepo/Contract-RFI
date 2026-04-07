@@ -1,8 +1,9 @@
-import { useState } from 'react'
-import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { BrowserRouter, Routes, Route, NavLink, useNavigate, Navigate } from 'react-router-dom'
 import './index.css'
 import './App.css'
 import ChatPage from './pages/ChatPage'
+import LoginPage from './pages/LoginPage'
 
 /* ── Icons (inline SVG) ──────────────────────────────────────── */
 export const Icon = {
@@ -42,20 +43,21 @@ export function Logo() {
 }
 
 /* ── Account Dropdown ─────────────────────────────────────────── */
-function AccountDropdown({ onClose }) {
+function AccountDropdown({ onClose, onLogout, user }) {
+  const initial = user?.email?.charAt(0).toUpperCase() || 'U'
   return (
     <div className="account-dropdown">
       <div className="account-dropdown-header">
-        <div className="account-avatar" style={{ width: 36, height: 36, fontSize: '1rem' }}>D</div>
+        <div className="account-avatar" style={{ width: 36, height: 36, fontSize: '1rem' }}>{initial}</div>
         <div>
-          <div className="account-dropdown-name">Danish Ali Siddiqui</div>
-          <div className="account-dropdown-email">danish@aafaqsolutions.com</div>
+          <div className="account-dropdown-name">{user?.name || 'User'}</div>
+          <div className="account-dropdown-email">{user?.email}</div>
         </div>
       </div>
       <div className="account-dropdown-item" onClick={onClose}>
         <Icon.Settings /> Settings
       </div>
-      <div className="account-dropdown-item" onClick={onClose}>
+      <div className="account-dropdown-item" onClick={onLogout}>
         <Icon.Logout /> Sign out
       </div>
     </div>
@@ -63,10 +65,11 @@ function AccountDropdown({ onClose }) {
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────── */
-function Sidebar({ collapsed, setCollapsed, activeProject, setActiveProject, projects, setProjects, setShowSearch }) {
+function Sidebar({ collapsed, setCollapsed, activeProject, setActiveProject, projects, setProjects, setShowSearch, onLogout, user }) {
   const [showAccount, setShowAccount] = useState(false)
   const [ctxMenu, setCtxMenu] = useState(null)
   const navigate = useNavigate()
+  const initial = user?.email?.charAt(0).toUpperCase() || 'U'
 
   const handleNewProject = () => {
     setActiveProject(null)
@@ -104,13 +107,13 @@ function Sidebar({ collapsed, setCollapsed, activeProject, setActiveProject, pro
           <button className="sidebar-nav-item sidebar-icon-only" title="Help"><Icon.Help /></button>
           <div style={{ position: 'relative' }}>
             <button className="sidebar-account-btn sidebar-icon-only" onClick={() => setShowAccount(v => !v)} style={{ justifyContent: 'center' }}>
-              <div className="account-avatar">D</div>
+              <div className="account-avatar">{initial}</div>
             </button>
             {showAccount && (
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setShowAccount(false)} />
                 <div style={{ position: 'absolute', bottom: '100%', left: 0, zIndex: 200 }}>
-                  <AccountDropdown onClose={() => setShowAccount(false)} />
+                  <AccountDropdown onClose={() => setShowAccount(false)} onLogout={onLogout} user={user} />
                 </div>
               </>
             )}
@@ -189,14 +192,14 @@ function Sidebar({ collapsed, setCollapsed, activeProject, setActiveProject, pro
         <button className="sidebar-nav-item"><Icon.Help /> Help</button>
         <div style={{ position: 'relative' }}>
           <button className="sidebar-account-btn" id="account-btn" onClick={() => setShowAccount(v => !v)}>
-            <div className="account-avatar">D</div>
-            Account
+            <div className="account-avatar">{initial}</div>
+            {user?.name || 'Account'}
           </button>
           {showAccount && (
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setShowAccount(false)} />
               <div style={{ position: 'absolute', bottom: '100%', left: 0, zIndex: 200 }}>
-                <AccountDropdown onClose={() => setShowAccount(false)} />
+                <AccountDropdown onClose={() => setShowAccount(false)} onLogout={onLogout} user={user} />
               </div>
             </>
           )}
@@ -246,7 +249,7 @@ function SearchPanel({ onClose, onSelect, projects }) {
 }
 
 /* ── App Shell ───────────────────────────────────────────────── */
-function AppShell() {
+function AppShell({ onLogout, user }) {
   const [activeProject, setActiveProject] = useState(null) // null = home screen
   const [showSearch, setShowSearch] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -264,11 +267,13 @@ function AppShell() {
             projects={projects}
             setProjects={setProjects}
             setShowSearch={setShowSearch}
+            onLogout={onLogout}
+            user={user}
           />
       }
 
       <Routes>
-        <Route path="*" element={
+        <Route path="/" element={
           <ChatPage
             project={activeProject}
             setProject={setActiveProject}
@@ -276,15 +281,51 @@ function AppShell() {
             setProjects={setProjects}
           />
         } />
+        <Route path="/chat" element={
+          <ChatPage
+            project={activeProject}
+            setProject={setActiveProject}
+            projects={projects}
+            setProjects={setProjects}
+          />
+        } />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
   )
 }
 
 export default function App() {
+  const [token, setToken] = useState(localStorage.getItem('token'))
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user'))
+    } catch {
+      return null
+    }
+  })
+
+  const logout = () => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    setToken(null)
+    setUser(null)
+  }
+
+  if (!token) {
+    return (
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </BrowserRouter>
+    )
+  }
+
   return (
     <BrowserRouter>
-      <AppShell />
+      <AppShell onLogout={logout} user={user} />
     </BrowserRouter>
   )
 }

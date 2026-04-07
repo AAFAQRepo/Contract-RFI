@@ -169,7 +169,23 @@ function formatAIText(text) {
 /* ── Collapsible Thinking block ──────────────────────────────── */
 function ThinkingBlock({ thinking }) {
   const [open, setOpen] = useState(false)
+  
+  // Auto-open if thinking content starts arriving
+  useEffect(() => {
+    if (thinking && thinking.trim().length > 0) setOpen(true)
+  }, [!!thinking])
+
   if (!thinking) return null
+
+  // Simple bullet point formatter for thinking
+  const renderedThinking = thinking.split('\n').map((line, i) => {
+    const t = line.trim()
+    if (t.startsWith('-') || t.startsWith('*')) {
+      return <li key={i} style={{ marginBottom: 4 }}>{t.substring(1).trim()}</li>
+    }
+    return <p key={i} style={{ marginBottom: 4 }}>{t}</p>
+  })
+
   return (
     <div className="thinking-block">
       <button className="thinking-toggle" onClick={() => setOpen(v => !v)}>
@@ -179,7 +195,9 @@ function ThinkingBlock({ thinking }) {
       </button>
       {open && (
         <div className="thinking-content">
-          {thinking}
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {renderedThinking}
+          </ul>
         </div>
       )}
     </div>
@@ -284,7 +302,58 @@ function ChatInput({
 }
 
 /* ── Home Screen component ───────────────────────────────────── */
-function HomeScreen({ input, setInput, onSend, onUploadClick, pendingFiles, onRemoveFile, sending, disabled }) {
+function HomeScreen({ input, setInput, onSend, onUploadClick, pendingFiles, onRemoveFile, sending, disabled, messages, setMessages, messagesEndRef, handleClearChat }) {
+  if (messages.length > 0) {
+    return (
+      <div className="main-area">
+        <div className="topbar">
+          <div className="topbar-left">
+            <span className="topbar-title">General Chat</span>
+          </div>
+          <div className="topbar-right">
+            <button className="topbar-btn" onClick={handleClearChat} style={{ color: '#d32f2f' }}>
+              <Icon.Close /> Clear Chat
+            </button>
+            <button className="topbar-btn" id="share-btn"><Icon.Share /> Share</button>
+          </div>
+        </div>
+        <div className="chat-area">
+          <div className="messages-wrapper">
+            {messages.map(msg =>
+              msg.role === 'user'
+                ? <UserMessage key={msg.id} text={msg.text} />
+                : <AIMessage key={msg.id} text={msg.text} thinking={msg.thinking} sources={msg.sources} />
+            )}
+            {sending && (
+              <div className="msg-ai">
+                <div className="thinking-block" style={{ pointerEvents: 'none' }}>
+                  <div className="thinking-toggle" style={{ cursor: 'default' }}>
+                    <span className="thinking-dot-anim">●</span>
+                    <span>Thinking…</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+        <div className="chat-input-wrapper">
+          <ChatInput 
+            input={input} 
+            setInput={setInput} 
+            onSend={onSend} 
+            onUploadClick={onUploadClick}
+            pendingFiles={pendingFiles}
+            onRemoveFile={onRemoveFile}
+            sending={sending}
+            disabled={disabled}
+            idPrefix="home-chat"
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="main-area">
       <div className="home-screen">
@@ -337,6 +406,22 @@ export default function ChatPage({ project, setProject, projects, setProjects })
   // Scroll to bottom on messages
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
+  // Load chat history when project changes
+  useEffect(() => {
+    const docId = project && project.id && !project.id.startsWith('temp-') ? project.id : 'global'
+    api.get(`/chat/history?document_id=${docId}`)
+      .then(r => {
+        // Flatten into user/ai pairs for the UI
+        const flattened = []
+        r.data.forEach(c => {
+          flattened.push({ id: `q-${c.id}`, role: 'user', text: c.query })
+          flattened.push({ id: `a-${c.id}`, role: 'ai', text: c.answer, sources: c.sources })
+        })
+        setMessages(flattened)
+      })
+      .catch(err => console.error('Failed to load history', err))
+  }, [project?.id])
+
   const sendMessage = async () => {
     if ((!input.trim() && pendingFiles.length === 0) || sending) return
     const text = input.trim()
@@ -348,36 +433,67 @@ export default function ChatPage({ project, setProject, projects, setProjects })
     setMessages(m => [...m, { id: Date.now(), role: 'user', text, files: attachedFiles }])
     setSending(true)
 
-    // If we're on home screen, switch to chat with a temporary project
-    if (!project) {
-      setProject({ 
-        id: `temp-${Date.now()}`, 
-        name: text.slice(0, 40) || (attachedFiles[0]?.filename || attachedFiles[0]?.name) || 'New Chat', 
-        files: attachedFiles.length 
-      })
-    }
-
     try {
-      const response = await api.post('/chat/message', {
-        query: text,
-        document_id: currentDocId
+      const token = localStorage.getItem('token')
+      const response = await fetch(`${api.defaults.baseURL}/chat/message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          query: text,
+          document_id: currentDocId
+        })
       })
 
-      const { answer, thinking, sources } = response.data
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
 
-      setMessages(m => [...m, {
-        id: Date.now() + 1,
-        role: 'ai',
-        text: answer,
-        thinking: thinking,
-        sources: sources
-      }])
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      
+      let aiMessageId = Date.now() + 1
+      let fullContent = ""
+      
+      // Add placeholder AI message
+      setMessages(m => [...m, { id: aiMessageId, role: 'ai', text: '', thinking: '', sources: [] }])
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        fullContent += chunk
+
+        // Re-parse the whole accumulated content to find/extract <thinking>
+        let currentThinking = ""
+        let currentAnswer = fullContent
+
+        if (fullContent.includes('<thinking>')) {
+          const parts = fullContent.split('<thinking>')
+          if (fullContent.includes('</thinking>')) {
+            const innerParts = parts[1].split('</thinking>')
+            currentThinking = innerParts[0].trim()
+            currentAnswer = innerParts[1].trim()
+          } else {
+            currentThinking = parts[1].trim()
+            currentAnswer = "" 
+          }
+        }
+
+        setMessages(m => m.map(msg => 
+          msg.id === aiMessageId 
+            ? { ...msg, text: currentAnswer, thinking: currentThinking }
+            : msg
+        ))
+      }
+
     } catch (err) {
-      console.error('Chat failed', err)
-      setMessages(m => [...m, {
-        id: Date.now() + 1,
-        role: 'ai',
-        text: 'Sorry, I encountered an error while connecting to the AI server. Please ensure the GPU server is reachable.',
+      console.error('Streaming error:', err)
+      setMessages(m => [...m, { 
+        id: Date.now() + 2, 
+        role: 'ai', 
+        text: `Sorry, I encountered an error while connecting to the AI server. (${err.message}). Please ensure the GPU server is reachable.` 
       }])
     } finally {
       setSending(false)
@@ -429,13 +545,27 @@ export default function ChatPage({ project, setProject, projects, setProjects })
     }
   }
 
+  const handleClearChat = async () => {
+    const docId = project && project.id && !project.id.startsWith('temp-') ? project.id : 'global'
+    if (!window.confirm("Clear all messages in this chat?")) return
+    
+    try {
+      await api.delete(`/chat/clear?document_id=${docId}`)
+      setMessages([])
+    } catch (e) {
+      alert('Failed to clear chat: ' + (e.response?.data?.detail || e.message))
+    }
+  }
+
   const removePendingFile = (file) => {
     setPendingFiles(p => p.filter(f => (f.id || f.name) !== (file.id || file.name)))
   }
 
   const triggerFileUpload = () => fileInputRef.current?.click()
   
+  const activeDoc = files.find(f => f.id === project?.id)
   const isProcessing = files.some(f => f.status === 'processing' || f.status === 'uploading')
+  const hasError = activeDoc?.status === 'error'
 
   // ── Home screen (project=null) ──
   if (!project) {
@@ -452,6 +582,10 @@ export default function ChatPage({ project, setProject, projects, setProjects })
           onRemoveFile={removePendingFile}
           sending={sending}
           disabled={isProcessing}
+          messages={messages}
+          setMessages={setMessages}
+          messagesEndRef={messagesEndRef}
+          handleClearChat={handleClearChat}
         />
         {showFiles && (
           <FilesPanel
@@ -484,6 +618,11 @@ export default function ChatPage({ project, setProject, projects, setProjects })
             <span className="topbar-chevron"><Icon.ChevronDown /></span>
           </div>
           <div className="topbar-right">
+            {project && !project.id.startsWith('temp-') && (
+              <button className="topbar-btn" onClick={handleClearChat} style={{ color: '#d32f2f' }}>
+                <Icon.Close /> Clear Chat
+              </button>
+            )}
             <button className="topbar-btn" id="share-btn"><Icon.Share /> Share</button>
             <button className="topbar-icon-btn" id="toggle-files-btn" onClick={() => setShowFiles(v => !v)}>
               <Icon.Columns />
@@ -498,6 +637,11 @@ export default function ChatPage({ project, setProject, projects, setProjects })
               <div className="chat-empty-icon">💬</div>
               <p>Discuss the files in this project</p>
               <p style={{ fontSize: '0.78rem', color: '#bbb' }}>Upload a contract to get started</p>
+              {hasError && (
+                <div style={{ marginTop: 20, color: '#d63031', fontSize: '0.85rem', maxWidth: 400 }}>
+                  ⚠️ There was an error processing this document. Check the files panel for details.
+                </div>
+              )}
             </div>
           ) : (
             <div className="messages-wrapper">
@@ -531,13 +675,14 @@ export default function ChatPage({ project, setProject, projects, setProjects })
             pendingFiles={pendingFiles}
             onRemoveFile={removePendingFile}
             sending={sending}
-            disabled={isProcessing}
+            disabled={isProcessing || hasError}
+            placeholder={hasError ? "Document processing failed. Send it again or try another." : undefined}
             idPrefix="chat"
           />
         </div>
 
         <div className="bottom-privacy">
-          <Icon.Lock /> Your data is secure and private
+          <Icon.Lock /> {hasError ? "Processing failed. Please check file errors." : "Your data is secure and private"}
         </div>
       </div>
 

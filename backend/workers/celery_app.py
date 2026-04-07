@@ -58,6 +58,7 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
     import uuid as _uuid
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+    from datetime import datetime
     from models.models import Document, Chunk
     from services.storage import download_document
     from services.extraction import extract_and_chunk
@@ -72,6 +73,7 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
         doc = session.get(Document, document_id)
         if doc:
             doc.status = status
+            doc.updated_at = datetime.utcnow()
             if step:
                 doc.processing_step = step
             if progress is not None:
@@ -82,6 +84,12 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
 
     session = Session()
     try:
+        # Pre-check existence (handles the race condition on server)
+        doc = session.get(Document, document_id)
+        if not doc:
+            print(f"⚠️  Document {document_id} not found in DB; retrying in 2s...")
+            raise self.retry(countdown=2)
+
         print(f"⏳ Processing document {document_id}")
         _update_status(session, "processing", step="Downloading", progress=10)
 
@@ -104,6 +112,7 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
         if doc:
             doc.language = language
             doc.page_count = page_count
+            doc.updated_at = datetime.utcnow()
             session.commit()
         
         _update_status(session, "processing", step="Embedding chunks", progress=70)

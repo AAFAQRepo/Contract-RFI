@@ -55,5 +55,3 @@ temp/
 .pydevproject
 .settings/
 
-# docker
-docker-compose.yml

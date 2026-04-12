@@ -382,7 +382,7 @@ function HomeScreen({ input, setInput, onSend, onUploadClick, pendingFiles, onRe
 }
 
 /* ── Main ChatPage ───────────────────────────────────────────── */
-export default function ChatPage({ project, setProject, projects, setProjects }) {
+export default function ChatPage({ project, setProject, projects, setProjects, onMessageSent }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -424,19 +424,21 @@ export default function ChatPage({ project, setProject, projects, setProjects })
 
   // Load chat history when project changes
   useEffect(() => {
+    // Always clear first for a clean slate (e.g., New Project resets to empty)
+    setMessages([])
     const docId = project && project.id && !project.id.startsWith('temp-') ? project.id : 'global'
     api.get(`/chat/history?document_id=${docId}`)
       .then(r => {
-        // Flatten into user/ai pairs for the UI
+        // Flatten DB rows into interleaved user + AI message pairs
         const flattened = []
         r.data.forEach(c => {
-          flattened.push({ id: `q-${c.id}`, role: 'user', text: c.query })
-          flattened.push({ id: `a-${c.id}`, role: 'ai', text: c.answer, sources: c.sources })
+          if (c.query) flattened.push({ id: `q-${c.id}`, role: 'user', text: c.query })
+          if (c.answer) flattened.push({ id: `a-${c.id}`, role: 'ai', text: c.answer, sources: c.sources })
         })
         setMessages(flattened)
       })
       .catch(err => console.error('Failed to load history', err))
-  }, [project?.id])
+  }, [project?.id])  // triggers on project change AND when project becomes null
 
   const sendMessage = async () => {
     if ((!input.trim() && pendingFiles.length === 0) || sending) return
@@ -503,6 +505,9 @@ export default function ChatPage({ project, setProject, projects, setProjects })
             : msg
         ))
       }
+
+      // Notify sidebar to refresh session list now that a new message is saved
+      if (onMessageSent) onMessageSent()
 
     } catch (err) {
       console.error('Streaming error:', err)

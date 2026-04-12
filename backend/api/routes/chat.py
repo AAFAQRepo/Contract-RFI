@@ -28,6 +28,7 @@ class SourceChunk(BaseModel):
 
 class ChatResponse(BaseModel):
     id: str
+    query: str = ""   # user's original question
     answer: str
     thinking: str
     sources: List[SourceChunk]
@@ -131,6 +132,7 @@ async def chat_history(
     return [
         ChatResponse(
             id=str(c.id),
+            query=c.query or "",
             answer=c.answer,
             thinking="", 
             sources=[SourceChunk(**s) for s in (c.sources or [])],
@@ -138,6 +140,45 @@ async def chat_history(
         )
         for c in chats
     ]
+
+
+@router.get("/sessions")
+async def chat_sessions(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns a list of distinct chat sessions for the sidebar.
+    - Global chats (no document) are grouped as a single 'General Chat' session.
+    - Document-linked chats appear per-document.
+    """
+    from sqlalchemy import func, text
+    
+    # Fetch one row per document_id (NULLs included), ordered by most recent message
+    stmt = (
+        select(
+            Chat.document_id,
+            func.max(Chat.created_at).label("last_message_at"),
+            func.count(Chat.id).label("message_count"),
+            func.min(Chat.query).label("first_query"),
+        )
+        .where(Chat.user_id == current_user.id)
+        .group_by(Chat.document_id)
+        .order_by(func.max(Chat.created_at).desc())
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    sessions = []
+    for row in rows:
+        sessions.append({
+            "document_id": str(row.document_id) if row.document_id else None,
+            "is_global": row.document_id is None,
+            "title": row.first_query[:60] if row.first_query else "General Chat",
+            "message_count": row.message_count,
+            "last_message_at": row.last_message_at.isoformat() if row.last_message_at else None,
+        })
+    return sessions
 
 @router.delete("/clear")
 async def clear_chat(

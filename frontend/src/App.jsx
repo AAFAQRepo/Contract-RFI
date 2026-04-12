@@ -65,14 +65,14 @@ function AccountDropdown({ onClose, onLogout, user }) {
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────── */
-function Sidebar({ collapsed, setCollapsed, activeProject, setActiveProject, projects, setProjects, setShowSearch, onLogout, user }) {
+function Sidebar({ collapsed, setCollapsed, activeProject, setActiveProject, projects, setProjects, setShowSearch, onLogout, user, chatSessions, activeChatSession, setActiveChatSession, onNewProject }) {
   const [showAccount, setShowAccount] = useState(false)
   const [ctxMenu, setCtxMenu] = useState(null)
   const navigate = useNavigate()
   const initial = user?.email?.charAt(0).toUpperCase() || 'U'
 
   const handleNewProject = () => {
-    setActiveProject(null)
+    if (onNewProject) onNewProject()
     navigate('/')
   }
 
@@ -128,7 +128,7 @@ function Sidebar({ collapsed, setCollapsed, activeProject, setActiveProject, pro
       <div 
         className="sidebar-logo" 
         style={{ marginBottom: 6, cursor: 'pointer' }}
-        onClick={() => { setActiveProject(null); navigate('/') }}
+        onClick={() => { setActiveProject(null); setActiveChatSession(null); navigate('/') }}
       >
         <Logo />
         <span className="sidebar-logo-text">Contract RFI</span>
@@ -152,7 +152,43 @@ function Sidebar({ collapsed, setCollapsed, activeProject, setActiveProject, pro
         </button>
       </div>
 
-      {/* Recent projects — from API data */}
+      {/* Chat sessions — populated from DB */}
+      {chatSessions.length > 0 && (
+        <>
+          <div className="sidebar-section-label">Chats</div>
+          <div style={{ overflowY: 'auto', maxHeight: 200, padding: '0 0 4px' }}>
+            {chatSessions.map(session => {
+              const isActive = session.is_global
+                ? !activeProject && activeChatSession === 'global'
+                : activeProject?.id === session.document_id
+              return (
+                <div
+                  key={session.document_id || 'global'}
+                  className={`sidebar-project-item ${isActive ? 'active' : ''}`}
+                  onClick={() => {
+                    if (session.is_global) {
+                      setActiveProject(null)
+                      setActiveChatSession('global')
+                      navigate('/')
+                    } else {
+                      const doc = projects.find(p => p.id === session.document_id)
+                      if (doc) { setActiveProject(doc); navigate('/chat') }
+                    }
+                  }}
+                  title={session.title}
+                >
+                  <span className="sidebar-project-name" style={{ color: session.is_global ? 'var(--text-secondary)' : undefined }}>
+                    {session.is_global ? '💬 ' : '📄 '}{session.title}
+                  </span>
+                  <span style={{ fontSize: '0.68rem', color: '#999', marginLeft: 4, flexShrink: 0 }}>{session.message_count}</span>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Recent document projects — from API data */}
       {projects.length > 0 && (
         <>
           <div className="sidebar-section-label">Recent projects</div>
@@ -161,7 +197,7 @@ function Sidebar({ collapsed, setCollapsed, activeProject, setActiveProject, pro
               <div
                 key={p.id}
                 className={`sidebar-project-item ${activeProject?.id === p.id ? 'active' : ''}`}
-                onClick={() => { setActiveProject(p); navigate('/chat') }}
+                onClick={() => { setActiveProject(p); setActiveChatSession(null); navigate('/chat') }}
                 id={`project-${p.id}`}
               >
                 <span className="sidebar-project-name">{p.filename || p.name}</span>
@@ -174,7 +210,7 @@ function Sidebar({ collapsed, setCollapsed, activeProject, setActiveProject, pro
           </div>
         </>
       )}
-      {projects.length === 0 && <div style={{ flex: 1 }} />}
+      {projects.length === 0 && chatSessions.length === 0 && <div style={{ flex: 1 }} />}
 
       {ctxMenu && (
         <>
@@ -250,10 +286,26 @@ function SearchPanel({ onClose, onSelect, projects }) {
 
 /* ── App Shell ───────────────────────────────────────────────── */
 function AppShell({ onLogout, user }) {
-  const [activeProject, setActiveProject] = useState(null) // null = home screen
+  const [activeProject, setActiveProject] = useState(null)
+  const [activeChatSession, setActiveChatSession] = useState(null) // 'global' or null
   const [showSearch, setShowSearch] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [projects, setProjects] = useState([]) // populated from API via ChatPage
+  const [projects, setProjects] = useState([])
+  const [chatSessions, setChatSessions] = useState([])
+  const [resetKey, setResetKey] = useState(0)  // increment to force ChatPage remount
+
+  // Load chat sessions (for sidebar) on mount + after new messages
+  const refreshChatSessions = () => {
+    const token = localStorage.getItem('token')
+    fetch('/api/chat/sessions', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(r => r.json())
+      .then(data => Array.isArray(data) ? setChatSessions(data) : null)
+      .catch(() => {})
+  }
+
+  useEffect(() => { refreshChatSessions() }, [])
 
   return (
     <div className="app-shell">
@@ -269,24 +321,36 @@ function AppShell({ onLogout, user }) {
             setShowSearch={setShowSearch}
             onLogout={onLogout}
             user={user}
+            chatSessions={chatSessions}
+            activeChatSession={activeChatSession}
+            setActiveChatSession={setActiveChatSession}
+            onNewProject={() => {
+              setActiveProject(null)
+              setActiveChatSession(null)
+              setResetKey(k => k + 1)
+            }}
           />
       }
 
       <Routes>
         <Route path="/" element={
           <ChatPage
+            key={`home-${resetKey}`}
             project={activeProject}
             setProject={setActiveProject}
             projects={projects}
             setProjects={setProjects}
+            onMessageSent={refreshChatSessions}
           />
         } />
         <Route path="/chat" element={
           <ChatPage
+            key={`chat-${resetKey}`}
             project={activeProject}
             setProject={setActiveProject}
             projects={projects}
             setProjects={setProjects}
+            onMessageSent={refreshChatSessions}
           />
         } />
         <Route path="*" element={<Navigate to="/" replace />} />

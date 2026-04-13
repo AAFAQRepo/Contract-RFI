@@ -409,12 +409,28 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
 
   // Load documents from API
   useEffect(() => {
-    api.get('/documents/').then(r => {
+    fetchDocuments()
+  }, [])
+
+  const fetchDocuments = async () => {
+    try {
+      const r = await api.get('/documents/')
       const docs = r.data.documents || []
       setFiles(docs)
       setProjects(docs)
-    }).catch(() => {})
-  }, [])
+    } catch (err) {
+      console.error('Failed to load documents', err)
+    }
+  }
+
+  // Global Polling for processing documents
+  useEffect(() => {
+    const hasProcessing = files.some(f => f.status === 'processing' || f.status === 'uploading')
+    if (!hasProcessing) return
+
+    const interval = setInterval(fetchDocuments, 3000)
+    return () => clearInterval(interval)
+  }, [files])
 
   // Scroll to bottom on messages
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
@@ -544,17 +560,7 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
       setPendingFiles(p => p.map(f => f.id === tempFile.id ? newDoc : f))
       setFiles(p => [newDoc, ...p])
       setProjects(p => [newDoc, ...p])
-
-      const iv = setInterval(async () => {
-        try {
-          const s = await api.get(`/documents/${newDoc.id}/status`)
-          const updated = { ...newDoc, ...s.data }
-          setPendingFiles(p => p.map(f => f.id === newDoc.id ? updated : f))
-          setFiles(p => p.map(d => d.id === newDoc.id ? updated : d))
-          setProjects(p => p.map(d => d.id === newDoc.id ? updated : d))
-          if (s.data.status === 'ready' || s.data.status === 'error') clearInterval(iv)
-        } catch { clearInterval(iv) }
-      }, 3000)
+      // Removed local setInterval - relying on global poller now
     } catch (e) {
       console.error('Upload failed', e)
       setPendingFiles(p => p.filter(f => f.id !== tempFile.id))
@@ -598,7 +604,9 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
   const triggerFileUpload = () => fileInputRef.current?.click()
   
   const activeDoc = files.find(f => f.id === project?.id)
-  const isProcessing = files.some(f => f.status === 'processing' || f.status === 'uploading')
+  
+  // FIXED: Only disable input if the ACTIVE document is processing, or if a global search has no active project and something is uploading
+  const isProcessing = activeDoc ? (activeDoc.status === 'processing' || activeDoc.status === 'uploading') : pendingFiles.length > 0
   const hasError = activeDoc?.status === 'error'
 
   // ── Home screen (project=null) ──

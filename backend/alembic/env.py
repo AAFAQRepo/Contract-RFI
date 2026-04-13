@@ -15,8 +15,12 @@ from models.models import (
     User, Document, Chunk, Review, Chat, QueryLog, CacheEntry,
 )
 
+# ── DATABASE CONNECTION LOGIC ──
+# 1. First, check for an explicit '-x db_url=...' passed via command line
+# 2. Otherwise, use the URL from the central settings (env files)
 settings = get_settings()
-DATABASE_URL = settings.DATABASE_URL_SYNC
+cmd_line_url = context.get_x_argument(as_dictionary=True).get("db_url")
+DATABASE_URL = cmd_line_url or settings.DATABASE_URL_SYNC
 
 config = context.config
 if config.config_file_name is not None:
@@ -25,9 +29,8 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
-    url = DATABASE_URL
     context.configure(
-        url=url,
+        url=DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -36,7 +39,7 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 def run_migrations_online() -> None:
-    # Use create_engine directly with our DATABASE_URL
+    # Use create_engine directly with our resolved DATABASE_URL
     connectable = create_engine(
         DATABASE_URL,
         poolclass=pool.NullPool,
@@ -54,3 +57,4 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
+

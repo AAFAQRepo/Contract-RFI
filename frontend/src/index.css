@@ -273,7 +273,31 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   font-size: 0.9rem;
   max-width: 75%;
   line-height: 1.5;
+  position: relative;
+  transition: padding-right 0.2s;
 }
+.msg-user-bubble:hover { padding-right: 36px; }
+.msg-bubble-delete {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: rgba(255,255,255,0.7);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #d32f2f;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.msg-user-bubble:hover .msg-bubble-delete { opacity: 1; }
+.msg-bubble-delete svg { width: 12px; height: 12px; }
+.msg-bubble-delete:hover { background: #fee; }
 
 /* AI message: left-aligned, no bubble */
 .msg-ai {
@@ -711,15 +735,22 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
 .thinking-toggle:hover { background: var(--bg-hover); }
 .thinking-chevron {
   margin-left: auto;
-  font-size: 0.85rem;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(45deg);
   transition: transform 0.2s;
-  display: inline-block;
+  margin-bottom: 2px;
 }
-.thinking-chevron.open { transform: rotate(180deg); }
+.thinking-chevron.open { transform: rotate(-135deg); margin-bottom: -2px; }
 .thinking-dot-anim {
-  color: var(--accent);
-  font-size: 0.6rem;
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  border-radius: 50%;
   animation: pulse-dot 1.4s ease-in-out infinite;
+  display: inline-block;
 }
 @keyframes pulse-dot {
   0%, 100% { opacity: 0.4; }

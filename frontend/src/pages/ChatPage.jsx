@@ -189,9 +189,9 @@ function ThinkingBlock({ thinking }) {
   return (
     <div className="thinking-block">
       <button className="thinking-toggle" onClick={() => setOpen(v => !v)}>
-        <span className="thinking-dot-anim">●</span>
+        <span className="thinking-dot-anim"></span>
         <span>Thinking</span>
-        <span className={`thinking-chevron ${open ? 'open' : ''}`}>▾</span>
+        <span className={`thinking-chevron ${open ? 'open' : ''}`}></span>
       </button>
       {open && (
         <div className="thinking-content">
@@ -205,11 +205,26 @@ function ThinkingBlock({ thinking }) {
 }
 
 /* ── Chat messages ───────────────────────────────────────────── */
-function UserMessage({ text }) {
-  return <div className="msg-user"><div className="msg-user-bubble">{text}</div></div>
+function UserMessage({ id, text, onDelete }) {
+  // Extract base ID if it's a q- prefix
+  const realId = id && id.startsWith('q-') ? id.slice(2) : id
+  
+  return (
+    <div className="msg-user">
+      <div className="msg-user-bubble">
+        {text}
+        <button className="msg-bubble-delete" onClick={() => onDelete(realId)} title="Delete message">
+          <Icon.Trash />
+        </button>
+      </div>
+    </div>
+  )
 }
 
-function AIMessage({ text, thinking, sources }) {
+function AIMessage({ id, text, thinking, sources, onDelete }) {
+  // Extract base ID if it's an a- prefix
+  const realId = id && id.startsWith('a-') ? id.slice(2) : id
+
   return (
     <div className="msg-ai">
       <ThinkingBlock thinking={thinking} />
@@ -225,6 +240,7 @@ function AIMessage({ text, thinking, sources }) {
         <button className="msg-action-btn" title="Helpful"><Icon.ThumbUp /></button>
         <button className="msg-action-btn" title="Not helpful"><Icon.ThumbDown /></button>
         <button className="msg-action-btn" title="Copy" onClick={() => navigator.clipboard.writeText(text)}><Icon.Copy /></button>
+        <button className="msg-action-btn" title="Delete" onClick={() => onDelete(realId)}><Icon.Trash /></button>
       </div>
     </div>
   )
@@ -311,9 +327,6 @@ function HomeScreen({ input, setInput, onSend, onUploadClick, pendingFiles, onRe
             <span className="topbar-title">General Chat</span>
           </div>
           <div className="topbar-right">
-            <button className="topbar-btn" onClick={handleClearChat} style={{ color: '#d32f2f' }}>
-              <Icon.Close /> Clear Chat
-            </button>
             <button className="topbar-btn" id="share-btn"><Icon.Share /> Share</button>
           </div>
         </div>
@@ -321,14 +334,14 @@ function HomeScreen({ input, setInput, onSend, onUploadClick, pendingFiles, onRe
           <div className="messages-wrapper">
             {messages.map(msg =>
               msg.role === 'user'
-                ? <UserMessage key={msg.id} text={msg.text} />
-                : <AIMessage key={msg.id} text={msg.text} thinking={msg.thinking} sources={msg.sources} />
+                ? <UserMessage key={msg.id} id={msg.id} text={msg.text} onDelete={handleDeleteMessage} />
+                : <AIMessage key={msg.id} id={msg.id} text={msg.text} thinking={msg.thinking} sources={msg.sources} onDelete={handleDeleteMessage} />
             )}
             {sending && (
               <div className="msg-ai">
                 <div className="thinking-block" style={{ pointerEvents: 'none' }}>
                   <div className="thinking-toggle" style={{ cursor: 'default' }}>
-                    <span className="thinking-dot-anim">●</span>
+                    <span className="thinking-dot-anim"></span>
                     <span>Thinking…</span>
                   </div>
                 </div>
@@ -408,12 +421,24 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
 
   // Load chat history when project changes
   useEffect(() => {
-    // Always clear first for a clean slate (e.g., New Project resets to empty)
+    // Always clear first for a clean slate
     setMessages([])
-    const docId = project && project.id && !project.id.startsWith('temp-') ? project.id : 'global'
+    
+    const isGlobal = !project || project.id.startsWith('temp-')
+    const docId = isGlobal ? 'global' : project.id
+
+    // If it's a fresh mount from "New Project" (activeChatSession is null), don't fetch any history
+    // We only fetch history if we have an active document OR if we explicitly selected a chat session
+    const activeSession = localStorage.getItem('activeChatSession') // Simplified session check
+    
+    // Check if we are in "New" state (passed via URL/props would be better, but we'll use project logic)
+    if (isGlobal && !localStorage.getItem('forceHistory')) {
+       // Skip loading history to show greeting
+       return
+    }
+
     api.get(`/chat/history?document_id=${docId}`)
       .then(r => {
-        // Flatten DB rows into interleaved user + AI message pairs
         const flattened = []
         r.data.forEach(c => {
           if (c.query) flattened.push({ id: `q-${c.id}`, role: 'user', text: c.query })
@@ -422,7 +447,7 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
         setMessages(flattened)
       })
       .catch(err => console.error('Failed to load history', err))
-  }, [project?.id])  // triggers on project change AND when project becomes null
+  }, [project?.id])
 
   const sendMessage = async () => {
     if ((!input.trim() && pendingFiles.length === 0) || sending) return
@@ -538,6 +563,22 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
     }
   }
 
+  const handleDeleteMessage = async (mid) => {
+    // mid is the raw UUID from DB (without q- or a- prefix)
+    if (!window.confirm("Delete this message?")) return
+    try {
+      await api.delete(`/chat/${mid}`)
+      // Remove both user and AI parts if they share the same base ID in the UI
+      // (The UI prefixes them with q- and a- and uses the same DB ID)
+      setMessages(m => m.filter(msg => {
+        const msgId = msg.id.toString()
+        return !msgId.endsWith(mid)
+      }))
+    } catch (e) {
+      alert('Failed to delete message: ' + (e.response?.data?.detail || e.message))
+    }
+  }
+
   const handleDeleteDocument = async (doc) => {
     if (!window.confirm(`Delete "${doc.filename}"? This cannot be undone.`)) return
     try {
@@ -547,18 +588,6 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
       setPendingFiles(p => p.filter(f => f.id !== doc.id))
     } catch (e) {
       alert('Failed to delete document: ' + (e.response?.data?.detail || e.message))
-    }
-  }
-
-  const handleClearChat = async () => {
-    const docId = project && project.id && !project.id.startsWith('temp-') ? project.id : 'global'
-    if (!window.confirm("Clear all messages in this chat?")) return
-    
-    try {
-      await api.delete(`/chat/clear?document_id=${docId}`)
-      setMessages([])
-    } catch (e) {
-      alert('Failed to clear chat: ' + (e.response?.data?.detail || e.message))
     }
   }
 
@@ -623,11 +652,6 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
             <span className="topbar-chevron"><Icon.ChevronDown /></span>
           </div>
           <div className="topbar-right">
-            {project && !project.id.startsWith('temp-') && (
-              <button className="topbar-btn" onClick={handleClearChat} style={{ color: '#d32f2f' }}>
-                <Icon.Close /> Clear Chat
-              </button>
-            )}
             <button className="topbar-btn" id="share-btn"><Icon.Share /> Share</button>
             <button className="topbar-icon-btn" id="toggle-files-btn" onClick={() => setShowFiles(v => !v)}>
               <Icon.Columns />
@@ -639,12 +663,12 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
         <div className="chat-area">
           {messages.length === 0 ? (
             <div className="chat-empty">
-              <div className="chat-empty-icon">💬</div>
+              <div className="chat-empty-icon"></div>
               <p>Discuss the files in this project</p>
               <p style={{ fontSize: '0.78rem', color: '#bbb' }}>Upload a contract to get started</p>
               {hasError && (
                 <div style={{ marginTop: 20, color: '#d63031', fontSize: '0.85rem', maxWidth: 400 }}>
-                  ⚠️ There was an error processing this document. Check the files panel for details.
+                  There was an error processing this document. Check the files panel for details.
                 </div>
               )}
             </div>
@@ -652,8 +676,8 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
             <div className="messages-wrapper">
               {messages.map(msg =>
                 msg.role === 'user'
-                  ? <UserMessage key={msg.id} text={msg.text} />
-                  : <AIMessage key={msg.id} text={msg.text} thinking={msg.thinking} sources={msg.sources} />
+                  ? <UserMessage key={msg.id} id={msg.id} text={msg.text} onDelete={handleDeleteMessage} />
+                  : <AIMessage key={msg.id} id={msg.id} text={msg.text} thinking={msg.thinking} sources={msg.sources} onDelete={handleDeleteMessage} />
               )}
               {sending && (
                 <div className="msg-ai">

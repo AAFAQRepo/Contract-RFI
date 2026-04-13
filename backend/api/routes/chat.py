@@ -199,3 +199,28 @@ async def clear_chat(
     await db.execute(stmt)
     await db.commit()
     return {"message": "Chat history cleared"}
+
+@router.delete("/{chat_id}")
+async def delete_chat_message(
+    chat_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a specific chat message."""
+    from uuid import UUID
+    
+    try:
+        chat_uuid = UUID(chat_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid chat ID format")
+
+    stmt = select(Chat).where(Chat.id == chat_uuid, Chat.user_id == current_user.id)
+    result = await db.execute(stmt)
+    chat_msg = result.scalar_one_or_none()
+
+    if not chat_msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    await db.delete(chat_msg)
+    await db.commit()
+    return {"message": "Message deleted"}

@@ -39,6 +39,7 @@ _pipeline_options = PdfPipelineOptions(
     ocr_model="suryaocr",
     allow_external_plugins=True,
     ocr_options=SuryaOcrOptions(lang=["en", "ar"]),
+    accelerator_device="cpu",  # Stability: offload to CPU to save VRAM for SGLang
 )
 
 _format_options = {
@@ -64,6 +65,7 @@ _fallback_format_options = {
 _no_ocr_pipeline_options = PdfPipelineOptions(
     do_ocr=False,
     allow_external_plugins=False,
+    accelerator_device="cpu",  # Even layout detection is safer on CPU
 )
 
 _no_ocr_format_options = {
@@ -179,7 +181,8 @@ def _parallel_pdf_convert(tmp_path: str, format_options: dict) -> tuple[list, st
     all_lc_docs = []
     full_texts = []
     
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    # max_workers=1 ensures stability on 24GB VRAM while segmenting prevents monolithic memory spikes
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         futures = {executor.submit(process_segment, seg): seg for seg in segments}
         results = [None] * len(segments)
         for fut in concurrent.futures.as_completed(futures):

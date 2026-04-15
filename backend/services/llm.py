@@ -23,8 +23,6 @@ FORMATTING:
 """
 
 USER_PROMPT_TEMPLATE = """USER NAME: {user_name}
-CONTEXT FROM DOCUMENTS:
-{context_text}
 
 USER QUERY: 
 {query}
@@ -48,15 +46,11 @@ class LLMService:
             
         context_parts = []
         for i, chunk in enumerate(chunks, 1):
-            score_text = f"Score   : {chunk.score:.2f} (High Confidence)" if hasattr(chunk, "score") and chunk.score else "Score   : N/A"
+            doc_label = chunk.document_id[:8] if len(chunk.document_id) >= 8 else "DOC"
+            section_label = chunk.section if chunk.section else "General"
             part = (
-                f"╔══ EVIDENCE [{i}/{len(chunks)}] ═══════════════════════════════════╗\n"
-                f"║ File    : {chunk.document_id}\n"
-                f"║ Location: {chunk.section} · Page {chunk.page}\n"
-                f"║ {score_text}\n"
-                f"╚══════════════════════════════════════════════════════╝\n"
-                f"Content:\n"
-                f"{chunk.text}\n"
+                f"[DOCUMENT: {doc_label}] | [PAGE: {chunk.page}] | [SECTION: {section_label}]\n"
+                f"CONTENT:\n{chunk.text}\n"
             )
             context_parts.append(part)
         return "\n".join(context_parts)
@@ -78,16 +72,17 @@ class LLMService:
         )
 
         try:
+            combined_system_prompt = f"{SYSTEM_PROMPT}\n\nCONTEXT FROM DOCUMENTS:\n{context_text}"
+            
             stream = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": combined_system_prompt},
                     {"role": "user", "content": user_content},
                 ],
                 stream=True,
                 temperature=0.4, # Improved variance for natural flow
                 max_tokens=2048,
-                extra_body={"cache_prompt": True},
             )
 
             async for chunk in stream:
@@ -117,15 +112,16 @@ class LLMService:
         )
 
         try:
+            combined_system_prompt = f"{SYSTEM_PROMPT}\n\nCONTEXT FROM DOCUMENTS:\n{context_text}"
+
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": combined_system_prompt},
                     {"role": "user", "content": user_content},
                 ],
                 temperature=0.2,
                 max_tokens=2048,
-                extra_body={"cache_prompt": True},
             )
             
             full_text = response.choices[0].message.content or ""

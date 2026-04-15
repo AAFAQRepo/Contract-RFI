@@ -25,8 +25,8 @@ from services.embedding import embed_query
 DENSE_TOP_K = 60       # Number of candidates from dense search
 SPARSE_TOP_K = 60      # Number of candidates from sparse (BM25) search
 RRF_K = 60             # Standard RRF constant (controls score smoothing)
-RERANK_TOP_K = 100     # Chunks passed to the reranker
-FINAL_TOP_K = 25       # Final returned chunks after reranking
+RERANK_TOP_K = 100      # Chunks passed to the reranker
+FINAL_TOP_K = 30        # Final returned chunks after reranking
 
 
 # ── Data Structures ──────────────────────────────────────────────────────────
@@ -188,10 +188,10 @@ class HybridRetriever:
     """
     High-level retrieval interface.
 
-    1. Dense search  → top 30 semantic matches
-    2. Sparse search → top 30 keyword matches
-    3. RRF            → merged + ranked top 50
-    4. Reranker       → final top 5
+    1. Dense search  → top 60 semantic matches
+    2. Sparse search → top 60 keyword matches
+    3. RRF            → merged + ranked top 100
+    4. Reranker       → final top 30
     """
 
     def search(

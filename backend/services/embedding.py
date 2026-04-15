@@ -11,42 +11,53 @@ Stores retrieval chunk embeddings in Qdrant.
 import uuid
 from typing import Optional
 
-from sentence_transformers import SentenceTransformer
-from qdrant_client.models import PointStruct
+import httpx
 
 from core.config import get_settings
 from core.clients import qdrant_client, QDRANT_COLLECTION
 
 settings = get_settings()
 
-# ── Model (loaded once, cached globally) ──────────────────────────────
-_model: Optional[SentenceTransformer] = None
-
-
-def get_embedding_model() -> SentenceTransformer:
-    global _model
-    if _model is None:
-        print(f"⏳ Loading embedding model: {settings.EMBEDDING_MODEL}")
-        _model = SentenceTransformer(settings.EMBEDDING_MODEL)
-        print("✅ Embedding model loaded")
-    return _model
-
-
 # ── Encoding helpers ──────────────────────────────────────────────────
 
 def embed_passages(texts: list[str]) -> list[list[float]]:
-    """Embed document passages (with 'passage: ' prefix)."""
-    model = get_embedding_model()
-    prefixed = [f"passage: {t}" for t in texts]
-    embeddings = model.encode(prefixed, batch_size=128, normalize_embeddings=True, show_progress_bar=True)
-    return embeddings.tolist()
+    """Embed document passages via Infinity HTTP Server."""
+    if not texts:
+        return []
+        
+    url = f"{settings.INFINITY_BASE_URL}/embeddings"
+    payload = {
+        "model": settings.EMBEDDING_MODEL,
+        "input": texts
+    }
+    
+    # BGE-m3 does not require instruction prefixes
+    with httpx.Client(timeout=120.0) as client:
+        response = client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        
+    embeddings = [None] * len(texts)
+    for item in data["data"]:
+        embeddings[item["index"]] = item["embedding"]
+        
+    return embeddings
 
 
 def embed_query(text: str) -> list[float]:
-    """Embed a single query (with 'query: ' prefix)."""
-    model = get_embedding_model()
-    embedding = model.encode(f"query: {text}", normalize_embeddings=True)
-    return embedding.tolist()
+    """Embed a single query via Infinity HTTP Server."""
+    url = f"{settings.INFINITY_BASE_URL}/embeddings"
+    payload = {
+        "model": settings.EMBEDDING_MODEL,
+        "input": [text]
+    }
+    
+    with httpx.Client(timeout=30.0) as client:
+        response = client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        
+    return data["data"][0]["embedding"]
 
 
 # ── Qdrant storage ────────────────────────────────────────────────────

@@ -151,7 +151,7 @@ def _build_lc_docs_from_document(document: Any) -> list[_ChunkDoc]:
     """
     chunker = HybridChunker(
         tokenizer=settings.EMBEDDING_MODEL,
-        max_tokens=512,  # multilingual-e5-large-instruct max sequence length
+        max_tokens=1024,  # Expanded sequence length for Infinity and bge-m3
     )
 
     try:
@@ -354,7 +354,7 @@ def extract_and_chunk(
             converter=converter,
             chunker=HybridChunker(
                 tokenizer=settings.EMBEDDING_MODEL,
-                max_tokens=512,
+                max_tokens=1024,
             ),
         )
         lc_docs = loader.load()

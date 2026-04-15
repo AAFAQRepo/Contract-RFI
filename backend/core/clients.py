@@ -37,8 +37,8 @@ qdrant_client = QdrantClient(
     port=settings.QDRANT_PORT,
 )
 
-QDRANT_COLLECTION = "text_chunks"
-EMBEDDING_DIMENSION = 1024  # multilingual-e5-large-instruct output dimension
+QDRANT_COLLECTION = "contracts_bge_m3"
+EMBEDDING_DIMENSION = 1024  # BAAI/bge-m3 output dimension
 
 
 def init_qdrant():

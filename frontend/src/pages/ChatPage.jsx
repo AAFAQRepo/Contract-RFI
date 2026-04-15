@@ -207,7 +207,7 @@ function ThinkingBlock({ thinking }) {
 /* ── Chat messages ───────────────────────────────────────────── */
 function UserMessage({ id, text, onDelete }) {
   // Extract base ID if it's a q- prefix
-  const realId = id && id.startsWith('q-') ? id.slice(2) : id
+  const realId = id && String(id).startsWith('q-') ? String(id).slice(2) : id
   
   return (
     <div className="msg-user">
@@ -223,7 +223,7 @@ function UserMessage({ id, text, onDelete }) {
 
 function AIMessage({ id, text, thinking, sources, onDelete }) {
   // Extract base ID if it's an a- prefix
-  const realId = id && id.startsWith('a-') ? id.slice(2) : id
+  const realId = id && String(id).startsWith('a-') ? String(id).slice(2) : id
 
   return (
     <div className="msg-ai">
@@ -435,12 +435,16 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
   // Scroll to bottom on messages
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
+  const handleClearChat = () => {
+    setMessages([])
+  }
+
   // Load chat history when project changes
   useEffect(() => {
     // Always clear first for a clean slate
     setMessages([])
     
-    const isGlobal = !project || project.id.startsWith('temp-')
+    const isGlobal = !project || String(project.id).startsWith('temp-')
     const docId = isGlobal ? 'global' : project.id
 
     // If it's a fresh mount from "New Project" (activeChatSession is null), don't fetch any history
@@ -469,7 +473,7 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
     if ((!input.trim() && pendingFiles.length === 0) || sending) return
     const text = input.trim()
     const attachedFiles = [...pendingFiles]
-    const currentDocId = project?.id && !project.id.startsWith('temp-') ? project.id : null
+    const currentDocId = project?.id && !String(project.id).startsWith('temp-') ? project.id : null
 
     setInput('')
     setPendingFiles([])

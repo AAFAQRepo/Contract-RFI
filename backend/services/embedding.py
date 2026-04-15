@@ -26,8 +26,11 @@ _model: Optional[SentenceTransformer] = None
 def get_embedding_model() -> SentenceTransformer:
     global _model
     if _model is None:
+        import logging
+        logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
         print(f"⏳ Loading embedding model: {settings.EMBEDDING_MODEL}")
         _model = SentenceTransformer(settings.EMBEDDING_MODEL)
+        _model.max_seq_length = 512
         print("✅ Embedding model loaded")
     return _model
 
@@ -38,7 +41,7 @@ def embed_passages(texts: list[str]) -> list[list[float]]:
     """Embed document passages (with 'passage: ' prefix)."""
     model = get_embedding_model()
     prefixed = [f"passage: {t}" for t in texts]
-    embeddings = model.encode(prefixed, normalize_embeddings=True, show_progress_bar=True)
+    embeddings = model.encode(prefixed, normalize_embeddings=True, show_progress_bar=True, batch_size=128)
     return embeddings.tolist()
 
 
@@ -91,8 +94,8 @@ def store_chunks_in_qdrant(
             )
         )
 
-    # Upsert in batches of 100
-    batch_size = 100
+    # Upsert in batches of 1000
+    batch_size = 1000
     for i in range(0, len(points), batch_size):
         batch = points[i : i + batch_size]
         qdrant_client.upsert(collection_name=QDRANT_COLLECTION, points=batch)
@@ -160,8 +163,8 @@ def store_docling_chunks_in_qdrant(
             )
         )
 
-    # Upsert in batches of 100
-    batch_size = 100
+    # Upsert in batches of 1000
+    batch_size = 1000
     for i in range(0, len(points), batch_size):
         batch = points[i : i + batch_size]
         qdrant_client.upsert(collection_name=QDRANT_COLLECTION, points=batch)

@@ -63,6 +63,8 @@ _fallback_format_options = {
 _no_ocr_pipeline_options = PdfPipelineOptions(
     do_ocr=False,
     allow_external_plugins=False,
+    generate_page_images=False,
+    generate_picture_images=False,
 )
 
 _no_ocr_format_options = {

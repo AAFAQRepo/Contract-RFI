@@ -318,7 +318,7 @@ function ChatInput({
 }
 
 /* ── Home Screen component ───────────────────────────────────── */
-function HomeScreen({ input, setInput, onSend, onUploadClick, pendingFiles, onRemoveFile, sending, disabled, messages, setMessages, messagesEndRef, handleClearChat }) {
+function HomeScreen({ input, setInput, onSend, onUploadClick, pendingFiles, onRemoveFile, sending, disabled, messages, setMessages, messagesEndRef, handleClearChat, handleDeleteMessage }) {
   if (messages.length > 0) {
     return (
       <div className="main-area">
@@ -632,6 +632,7 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
           setMessages={setMessages}
           messagesEndRef={messagesEndRef}
           handleClearChat={handleClearChat}
+          handleDeleteMessage={handleDeleteMessage}
         />
         {showFiles && (
           <FilesPanel

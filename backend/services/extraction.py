@@ -26,6 +26,18 @@ from docling.chunking import HybridChunker
 from langchain_docling import DoclingLoader
 from langchain_docling.loader import ExportType
 import concurrent.futures
+import threading
+import logging
+
+# ── Logging Suppression ───────────────────────────────────────────────
+# Silence redundant plugin/initialization logs for cleaner parallel output
+logging.getLogger("docling").setLevel(logging.ERROR)
+logging.getLogger("docling_ibm_models").setLevel(logging.ERROR)
+_logger = logging.getLogger(__name__)
+
+# ── Thread-local Engine Cache ─────────────────────────────────────────
+# Re-using converters and chunkers avoids 2-3s of init-time per segment.
+_thread_cache = threading.local()
 
 from core.config import get_settings
 
@@ -148,7 +160,7 @@ def _parallel_pdf_convert(tmp_path: str, format_options: dict) -> tuple[list, st
         return _build_lc_docs_from_document(res.document), res.document.export_to_markdown(), _get_page_count(res)
 
     print(f"🚀 Splitting {page_count} page PDF for parallel Docling conversion...")
-    SEGMENT_SIZE = 25
+    SEGMENT_SIZE = 40  # Increased for lower overhead
     segments = []
     for start_page in range(0, page_count, SEGMENT_SIZE):
         end_page = min(start_page + SEGMENT_SIZE - 1, page_count - 1)
@@ -164,7 +176,12 @@ def _parallel_pdf_convert(tmp_path: str, format_options: dict) -> tuple[list, st
     doc.close()
 
     def process_segment(seg):
-        converter = DocumentConverter(format_options=format_options)
+        # Retrieve or initialize thread-local converter
+        cache_key = f"conv_{id(format_options)}"
+        if not hasattr(_thread_cache, cache_key):
+            setattr(_thread_cache, cache_key, DocumentConverter(format_options=format_options))
+        
+        converter = getattr(_thread_cache, cache_key)
         res = converter.convert(seg["path"])
         txt = res.document.export_to_markdown()
         docs = _build_lc_docs_from_document(res.document)
@@ -181,8 +198,8 @@ def _parallel_pdf_convert(tmp_path: str, format_options: dict) -> tuple[list, st
     all_lc_docs = []
     full_texts = []
     
-    # Optimized for Multi-Server setup: 12GB free VRAM allows 4 parallel GPU threads
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    # Using 3 workers is the "Goldilocks" zone for throughput vs scheduling overhead
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(process_segment, seg): seg for seg in segments}
         results = [None] * len(segments)
         for fut in concurrent.futures.as_completed(futures):
@@ -253,10 +270,13 @@ def _build_lc_docs_from_document(document: Any) -> list[_ChunkDoc]:
     Build LangChain-like docs directly from an already-converted Docling document.
     This avoids a second full conversion pass in DoclingLoader.
     """
-    chunker = HybridChunker(
-        tokenizer=settings.EMBEDDING_MODEL,
-        max_tokens=512,  # multilingual-e5-large-instruct max sequence length
-    )
+    # Reuse thread-local chunker to stabilize chunk boundaries and save init time
+    if not hasattr(_thread_cache, "chunker"):
+        _thread_cache.chunker = HybridChunker(
+            tokenizer=settings.EMBEDDING_MODEL,
+            max_tokens=512,
+        )
+    chunker = _thread_cache.chunker
 
     try:
         chunks_iter = chunker.chunk(dl_doc=document)

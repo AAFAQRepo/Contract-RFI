@@ -38,14 +38,24 @@ def embed_passages(texts: list[str]) -> list[list[float]]:
     """Embed document passages (with 'passage: ' prefix)."""
     model = get_embedding_model()
     prefixed = [f"passage: {t}" for t in texts]
-    embeddings = model.encode(prefixed, normalize_embeddings=True, show_progress_bar=True)
+    embeddings = model.encode(
+        prefixed, 
+        normalize_embeddings=True, 
+        show_progress_bar=True,
+        batch_size=128,          # A10-tuned: 4x throughput
+        device="cuda"
+    )
     return embeddings.tolist()
 
 
 def embed_query(text: str) -> list[float]:
     """Embed a single query (with 'query: ' prefix)."""
     model = get_embedding_model()
-    embedding = model.encode(f"query: {text}", normalize_embeddings=True)
+    embedding = model.encode(
+        f"query: {text}", 
+        normalize_embeddings=True,
+        device="cuda"
+    )
     return embedding.tolist()
 
 

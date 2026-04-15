@@ -48,12 +48,15 @@ class LLMService:
             
         context_parts = []
         for i, chunk in enumerate(chunks, 1):
+            score_text = f"Score   : {chunk.score:.2f} (High Confidence)" if hasattr(chunk, "score") and chunk.score else "Score   : N/A"
             part = (
-                f"--- SEGMENT {i} ---\n"
-                f"Document: {chunk.document_id}\n"
-                f"Section: {chunk.section}\n"
-                f"Page: {chunk.page}\n"
-                f"Content: {chunk.text}\n"
+                f"╔══ EVIDENCE [{i}/{len(chunks)}] ═══════════════════════════════════╗\n"
+                f"║ File    : {chunk.document_id}\n"
+                f"║ Location: {chunk.section} · Page {chunk.page}\n"
+                f"║ {score_text}\n"
+                f"╚══════════════════════════════════════════════════════╝\n"
+                f"Content:\n"
+                f"{chunk.text}\n"
             )
             context_parts.append(part)
         return "\n".join(context_parts)
@@ -84,6 +87,7 @@ class LLMService:
                 stream=True,
                 temperature=0.4, # Improved variance for natural flow
                 max_tokens=2048,
+                extra_body={"cache_prompt": True},
             )
 
             async for chunk in stream:
@@ -121,6 +125,7 @@ class LLMService:
                 ],
                 temperature=0.2,
                 max_tokens=2048,
+                extra_body={"cache_prompt": True},
             )
             
             full_text = response.choices[0].message.content or ""

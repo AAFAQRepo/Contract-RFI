@@ -25,6 +25,7 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.chunking import HybridChunker
 from langchain_docling import DoclingLoader
 from langchain_docling.loader import ExportType
+import concurrent.futures
 
 from core.config import get_settings
 
@@ -100,6 +101,109 @@ def _should_enable_ocr(ext: str, full_text: str, page_count: int) -> bool:
 
     # Scanned PDFs often have very low extracted text density without OCR.
     return text_len < 1200 or chars_per_page < 180
+
+
+def _is_likely_scanned(filename: str, file_bytes: bytes) -> bool:
+    """Heuristics to detect if a document needs OCR before even trying."""
+    ext = Path(filename).suffix.lower()
+    if ext in [".jpg", ".jpeg", ".png", ".tiff", ".bmp", ".gif"]:
+        return True
+    
+    if ext == ".pdf":
+        try:
+            import fitz
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            if len(doc) > 0:
+                total_text = ""
+                for i in range(min(3, len(doc))):
+                    total_text += doc[i].get_text().strip()
+                if len(total_text) < 100:
+                    return True
+        except Exception:
+            pass
+            
+    return False
+
+
+def _parallel_pdf_convert(tmp_path: str, format_options: dict) -> tuple[list, str, int]:
+    """Split large PDF into chunks, process in parallel threads, and merge."""
+    import fitz
+    
+    try:
+        doc = fitz.open(tmp_path)
+        page_count = len(doc)
+    except Exception as e:
+        print(f"⚠️  PyMuPDF open failed: {e}. Falling back to sequential.")
+        converter = DocumentConverter(format_options=format_options)
+        res = converter.convert(tmp_path)
+        return _build_lc_docs_from_document(res.document), res.document.export_to_markdown(), _get_page_count(res)
+
+    PARALLEL_THRESHOLD = 20
+    if page_count < PARALLEL_THRESHOLD:
+        doc.close()
+        converter = DocumentConverter(format_options=format_options)
+        res = converter.convert(tmp_path)
+        return _build_lc_docs_from_document(res.document), res.document.export_to_markdown(), _get_page_count(res)
+
+    print(f"🚀 Splitting {page_count} page PDF for parallel Docling conversion...")
+    SEGMENT_SIZE = 25
+    segments = []
+    for start_page in range(0, page_count, SEGMENT_SIZE):
+        end_page = min(start_page + SEGMENT_SIZE - 1, page_count - 1)
+        sub_doc = fitz.open()
+        sub_doc.insert_pdf(doc, from_page=start_page, to_page=end_page)
+        
+        fd, sub_path = tempfile.mkstemp(suffix=".pdf")
+        os.close(fd)
+        sub_doc.save(sub_path)
+        sub_doc.close()
+        segments.append({"path": sub_path, "offset": start_page})
+        
+    doc.close()
+
+    def process_segment(seg):
+        converter = DocumentConverter(format_options=format_options)
+        res = converter.convert(seg["path"])
+        txt = res.document.export_to_markdown()
+        docs = _build_lc_docs_from_document(res.document)
+        # Fix page offsets from sub-document local page to global page
+        offset = seg["offset"]
+        for d in docs:
+            items = d.metadata.get("dl_meta", {}).get("doc_items", [])
+            for item in items:
+                for prov in item.get("prov", []):
+                    if "page_no" in prov:
+                        prov["page_no"] += offset
+        return docs, txt
+
+    all_lc_docs = []
+    full_texts = []
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(process_segment, seg): seg for seg in segments}
+        results = [None] * len(segments)
+        for fut in concurrent.futures.as_completed(futures):
+            seg = futures[fut]
+            idx = segments.index(seg)
+            try:
+                r_docs, r_txt = fut.result()
+                results[idx] = (r_docs, r_txt)
+            except Exception as e:
+                print(f"⚠️ Segment extraction failed: {e}")
+                results[idx] = ([], "")
+
+    # Cleanup temp segments
+    for seg in segments:
+        try:
+            os.unlink(seg["path"])
+        except:
+            pass
+
+    for r_docs, r_txt in results:
+        if r_docs: all_lc_docs.extend(r_docs)
+        if r_txt: full_texts.append(r_txt)
+            
+    return all_lc_docs, "\n\n".join(full_texts), page_count
 
 
 def _to_dict_safe(value: Any) -> dict | None:
@@ -291,30 +395,29 @@ def extract_and_chunk(
     try:
         print(f"📄 Docling: parsing {filename} ...")
 
-        # ── Step 1: Convert document (fast path first for PDFs) ───────────
+        # ── Step 1: Pre-emptive OCR Check ───────────
+        needs_ocr = _is_likely_scanned(filename, file_bytes)
+        if needs_ocr:
+            print("🧾 Pre-emptive OCR triggered (detected image/scanned PDF)")
+            lc_docs, full_text, page_count = _parallel_pdf_convert(tmp_path, _format_options)
+            print(f"✅ Docling: parsed {page_count} pages, {len(full_text)} chars")
+            print(f"✂️  Docling: produced {len(lc_docs)} chunks")
+            return lc_docs, full_text, page_count
+
+        # ── Step 2: Convert document (fast path first for PDFs) ───────────
         if ext == ".pdf":
-            print("⚡ Fast path: trying PDF parse without OCR")
-            converter = DocumentConverter(format_options=_no_ocr_format_options)
-            result = converter.convert(tmp_path)
-            full_text = result.document.export_to_markdown()
-            page_count = _get_page_count(result)
+            print("⚡ Fast path: trying PDF parse without OCR (Parallelized if large)")
+            lc_docs, full_text, page_count = _parallel_pdf_convert(tmp_path, _no_ocr_format_options)
 
             if _should_enable_ocr(ext=ext, full_text=full_text, page_count=page_count):
                 print("🧾 Low native text density detected; enabling OCR path")
-                result, converter = _convert_with_ocr(tmp_path)
-                full_text = result.document.export_to_markdown()
-                page_count = _get_page_count(result)
+                lc_docs, full_text, page_count = _parallel_pdf_convert(tmp_path, _format_options)
             else:
                 print("✅ Native PDF text sufficient; skipped OCR")
         else:
-            result, converter = _convert_with_ocr(tmp_path)
-            full_text = result.document.export_to_markdown()
-            page_count = _get_page_count(result)
+            lc_docs, full_text, page_count = _parallel_pdf_convert(tmp_path, _format_options)
 
         print(f"✅ Docling: parsed {page_count} pages, {len(full_text)} chars")
-
-        # ── Step 2: Chunk directly from conversion result (single pass) ────
-        lc_docs = _build_lc_docs_from_document(result.document)
         if not lc_docs:
             raise RuntimeError("No chunks produced from direct Docling chunking")
         print(f"✂️  Docling: produced {len(lc_docs)} chunks")

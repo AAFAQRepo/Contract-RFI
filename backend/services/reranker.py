@@ -34,7 +34,8 @@ def get_reranker() -> CrossEncoder:
 def rerank_chunks(
     query: str,
     chunks,  # list[RetrievedChunk]
-    top_k: int = 5,
+    top_k: int = 25,
+    min_score: float = -2.0,
 ) -> list:
     """
     Re-score `chunks` against `query` using the cross-encoder.
@@ -59,6 +60,9 @@ def rerank_chunks(
 
     result = []
     for score, chunk in scored[:top_k]:
+        if float(score) < min_score:
+            print(f"   🚫 Dropped chunk (score={score:.2f} < threshold={min_score})")
+            continue
         chunk.score = float(score)
         result.append(chunk)
 

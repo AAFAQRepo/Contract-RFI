@@ -22,11 +22,11 @@ from services.embedding import embed_query
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-DENSE_TOP_K = 30       # Number of candidates from dense search
-SPARSE_TOP_K = 30      # Number of candidates from sparse (BM25) search
+DENSE_TOP_K = 60       # Number of candidates from dense search
+SPARSE_TOP_K = 60      # Number of candidates from sparse (BM25) search
 RRF_K = 60             # Standard RRF constant (controls score smoothing)
-RERANK_TOP_K = 50      # Chunks passed to the reranker
-FINAL_TOP_K = 5        # Final returned chunks after reranking
+RERANK_TOP_K = 100     # Chunks passed to the reranker
+FINAL_TOP_K = 25       # Final returned chunks after reranking
 
 
 # ── Data Structures ──────────────────────────────────────────────────────────

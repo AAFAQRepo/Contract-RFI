@@ -43,6 +43,28 @@ celery_app.conf.update(
 )
 
 
+from celery.signals import worker_ready
+
+@worker_ready.connect
+def warm_models(sender, **kwargs):
+    """Pre-load all AI models into VRAM on worker startup."""
+    print("🔥 Warming models into VRAM...")
+    
+    # 1. Load embedding model
+    from services.embedding import get_embedding_model
+    get_embedding_model()
+    
+    # 2. Load reranker
+    from services.reranker import get_reranker
+    get_reranker()
+    
+    # 3. Pre-initialize Docling pipeline (loads layout detection models)
+    from docling.document_converter import DocumentConverter
+    DocumentConverter()  # triggers model download/load
+    
+    print("✅ All models warmed. Worker ready.")
+
+
 @celery_app.task(name="workers.test_task")
 def test_task(message: str) -> dict:
     """Test task to verify Celery is working."""

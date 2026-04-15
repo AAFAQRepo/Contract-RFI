@@ -37,13 +37,10 @@ class Settings(BaseSettings):
     SGLANG_USE_FORM_DATA: bool = False
 
     # ── Embedding ──
-    EMBEDDING_MODEL: str = "BAAI/bge-m3"
+    EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large-instruct"
 
     # ── Reranker ──
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
-    
-    # ── Infinity ──
-    INFINITY_BASE_URL: str = "http://infinity:7997"
 
     # ── Celery ──
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"

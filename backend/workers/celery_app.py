@@ -39,6 +39,22 @@ celery_app.conf.update(
 )
 
 
+from celery.signals import worker_process_init
+
+@worker_process_init.connect
+def init_worker(**kwargs):
+    """Warm up models in VRAM when the worker starts."""
+    print("🔥 Warming up models in VRAM...")
+    try:
+        from services.embedding import get_embedding_model
+        from services.reranker import get_reranker
+        
+        get_embedding_model()
+        get_reranker()
+        print("✅ Models warmed up successfully.")
+    except Exception as e:
+        print(f"⚠️ Failed to warm up models: {e}")
+
 
 @celery_app.task(name="workers.test_task")
 def test_task(message: str) -> dict:

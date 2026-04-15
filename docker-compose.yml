@@ -62,25 +62,6 @@ services:
       retries: 5
 
   # Application Services
-  infinity:
-    image: michaelf34/infinity:latest
-    container_name: contract_rfi_infinity
-    restart: always
-    ports:
-      - "127.0.0.1:7997:7997"
-    environment:
-      - INFINITY_MODEL_ID=BAAI/bge-m3;BAAI/bge-reranker-v2-m3
-      - INFINITY_BATCH_SIZE=128
-    volumes:
-      - model_cache:/app/.cache
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-
   backend:
     build:
       context: ./backend

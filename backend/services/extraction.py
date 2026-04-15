@@ -38,7 +38,6 @@ _pipeline_options = PdfPipelineOptions(
     ocr_model="suryaocr",
     allow_external_plugins=True,
     ocr_options=SuryaOcrOptions(lang=["en", "ar"]),
-    num_threads=8,
 )
 
 _format_options = {
@@ -53,7 +52,6 @@ _fallback_pipeline_options = PdfPipelineOptions(
     allow_external_plugins=False,
     # Tesseract uses ISO-639-2 language codes.
     ocr_options=TesseractCliOcrOptions(lang=["eng", "ara", "hin"]),
-    num_threads=8,
 )
 
 _fallback_format_options = {
@@ -65,7 +63,6 @@ _fallback_format_options = {
 _no_ocr_pipeline_options = PdfPipelineOptions(
     do_ocr=False,
     allow_external_plugins=False,
-    num_threads=8,
 )
 
 _no_ocr_format_options = {
@@ -296,40 +293,19 @@ def extract_and_chunk(
 
         # ── Step 1: Convert document (fast path first for PDFs) ───────────
         if ext == ".pdf":
-            # ── PRE-EMPTIVE OCR PROBE ───────────
-            import fitz
-            looks_like_scan = False
-            try:
-                doc_fitz = fitz.open(tmp_path)
-                probe_pages = min(3, len(doc_fitz))
-                extracted_len = 0
-                for i in range(probe_pages):
-                    extracted_len += len(doc_fitz[i].get_text("text").strip())
-                doc_fitz.close()
-                if extracted_len < 100:
-                    looks_like_scan = True
-            except Exception as e:
-                print(f"⚠️ PyMuPDF probe failed: {e}")
+            print("⚡ Fast path: trying PDF parse without OCR")
+            converter = DocumentConverter(format_options=_no_ocr_format_options)
+            result = converter.convert(tmp_path)
+            full_text = result.document.export_to_markdown()
+            page_count = _get_page_count(result)
 
-            if looks_like_scan:
-                print("🧾 Pre-emptive OCR triggered: Document appears to be a scanned image.")
+            if _should_enable_ocr(ext=ext, full_text=full_text, page_count=page_count):
+                print("🧾 Low native text density detected; enabling OCR path")
                 result, converter = _convert_with_ocr(tmp_path)
                 full_text = result.document.export_to_markdown()
                 page_count = _get_page_count(result)
             else:
-                print("⚡ Fast path: trying PDF parse without OCR")
-                converter = DocumentConverter(format_options=_no_ocr_format_options)
-                result = converter.convert(tmp_path)
-                full_text = result.document.export_to_markdown()
-                page_count = _get_page_count(result)
-
-                if _should_enable_ocr(ext=ext, full_text=full_text, page_count=page_count):
-                    print("🧾 Low native text density detected; enabling OCR path")
-                    result, converter = _convert_with_ocr(tmp_path)
-                    full_text = result.document.export_to_markdown()
-                    page_count = _get_page_count(result)
-                else:
-                    print("✅ Native PDF text sufficient; skipped OCR")
+                print("✅ Native PDF text sufficient; skipped OCR")
         else:
             result, converter = _convert_with_ocr(tmp_path)
             full_text = result.document.export_to_markdown()

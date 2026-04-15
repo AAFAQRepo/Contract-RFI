@@ -23,6 +23,8 @@ FORMATTING:
 """
 
 USER_PROMPT_TEMPLATE = """USER NAME: {user_name}
+CONTEXT FROM DOCUMENTS:
+{context_text}
 
 USER QUERY: 
 {query}
@@ -46,11 +48,12 @@ class LLMService:
             
         context_parts = []
         for i, chunk in enumerate(chunks, 1):
-            doc_label = chunk.document_id[:8] if len(chunk.document_id) >= 8 else "DOC"
-            section_label = chunk.section if chunk.section else "General"
             part = (
-                f"[DOCUMENT: {doc_label}] | [PAGE: {chunk.page}] | [SECTION: {section_label}]\n"
-                f"CONTENT:\n{chunk.text}\n"
+                f"--- SEGMENT {i} ---\n"
+                f"Document: {chunk.document_id}\n"
+                f"Section: {chunk.section}\n"
+                f"Page: {chunk.page}\n"
+                f"Content: {chunk.text}\n"
             )
             context_parts.append(part)
         return "\n".join(context_parts)
@@ -72,12 +75,10 @@ class LLMService:
         )
 
         try:
-            combined_system_prompt = f"{SYSTEM_PROMPT}\n\nCONTEXT FROM DOCUMENTS:\n{context_text}"
-            
             stream = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": combined_system_prompt},
+                    {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_content},
                 ],
                 stream=True,
@@ -112,12 +113,10 @@ class LLMService:
         )
 
         try:
-            combined_system_prompt = f"{SYSTEM_PROMPT}\n\nCONTEXT FROM DOCUMENTS:\n{context_text}"
-
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": combined_system_prompt},
+                    {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_content},
                 ],
                 temperature=0.2,

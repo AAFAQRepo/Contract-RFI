@@ -17,9 +17,6 @@ import sys
 # macOS fix for Python multiprocessing with PyTorch / C-extensions
 os.environ["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
 
-# Force all HuggingFace / Transformers loading to run in pure offline mode
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 # Add backend directory to sys.path so modules like 'models' can be imported when running Celery
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

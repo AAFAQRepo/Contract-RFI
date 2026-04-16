@@ -25,6 +25,7 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.chunking import HybridChunker
 from langchain_docling import DoclingLoader
 from langchain_docling.loader import ExportType
+from transformers import AutoTokenizer
 
 from core.config import get_settings
 
@@ -148,7 +149,6 @@ def _build_lc_docs_from_document(document: Any) -> list[_ChunkDoc]:
     Build LangChain-like docs directly from an already-converted Docling document.
     This avoids a second full conversion pass in DoclingLoader.
     """
-    from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL, trust_remote_code=True)
 
     chunker = HybridChunker(

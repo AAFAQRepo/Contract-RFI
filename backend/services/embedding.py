@@ -40,7 +40,7 @@ def get_embedding_model() -> SentenceTransformer:
 def embed_passages(texts: list[str]) -> list[list[float]]:
     """Embed document passages."""
     model = get_embedding_model()
-    embeddings = model.encode(texts, normalize_embeddings=True, show_progress_bar=True, batch_size=128)
+    embeddings = model.encode(texts, normalize_embeddings=True, show_progress_bar=True, batch_size=256)
     return embeddings.tolist()
 
 

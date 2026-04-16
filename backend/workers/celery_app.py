@@ -3,11 +3,11 @@ Celery async tasks for document processing.
 
 process_document — full ingestion pipeline:
   1. Download file from MinIO
-  2. Detect type → extract text (digital or OCR)
+  2. Three-tier extraction: Lean → Enriched (FAST tables) → OCR
   3. Detect language
-  4. Dual chunk (retrieval + analysis)
-  5. Embed retrieval chunks → Qdrant
-  6. Store analysis chunks → PostgreSQL
+  4. Chunk with Docling HybridChunker
+  5. Embed chunks → Qdrant
+  6. Store chunks → PostgreSQL
   7. Update document status
 """
 
@@ -44,6 +44,22 @@ celery_app.conf.update(
 )
 
 
+# ── Pre-warm GPU models on worker startup ─────────────────────────────
+from celery.signals import worker_init  # noqa: E402
+
+
+@worker_init.connect
+def _preload_models(**kwargs):
+    """Load the embedding model into GPU memory at worker boot time.
+    Eliminates the ~3s cold-start penalty on the first document."""
+    try:
+        from services.embedding import get_embedding_model
+        get_embedding_model()
+        print("🔥 Embedding model pre-warmed on worker startup")
+    except Exception as exc:
+        print(f"⚠️  Could not pre-warm embedding model: {exc}")
+
+
 @celery_app.task(name="workers.test_task")
 def test_task(message: str) -> dict:
     """Test task to verify Celery is working."""
@@ -54,7 +70,7 @@ def test_task(message: str) -> dict:
 def process_document(self, document_id: str, user_id: str, object_name: str, filename: str):
     """
     Full async ingestion pipeline for a single document.
-    Uses Docling + Surya OCR + HybridChunker.
+    Uses Docling three-tier pipeline (Lean → Enriched → OCR) + HybridChunker.
     """
     import uuid as _uuid
     from sqlalchemy import create_engine

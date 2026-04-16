@@ -18,9 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from docling_surya import SuryaOcrOptions
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions, TesseractCliOcrOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.chunking import HybridChunker
 from langchain_docling import DoclingLoader
@@ -33,12 +32,11 @@ settings = get_settings()
 
 # ── Pipeline options (configured once) ────────────────────────────────
 
-# Primary OCR pipeline (Surya)
+# Primary OCR pipeline (RapidOCR - Fast & Light)
 _pipeline_options = PdfPipelineOptions(
     do_ocr=True,
-    ocr_model="suryaocr",
-    allow_external_plugins=True,
-    ocr_options=SuryaOcrOptions(lang=["en", "ar"]),
+    allow_external_plugins=False,
+    ocr_options=RapidOcrOptions(),
 )
 
 _format_options = {
@@ -193,75 +191,16 @@ def _build_lc_docs_from_document(document: Any) -> list[_ChunkDoc]:
 
 
 def _convert_with_ocr(tmp_path: str):
-    """Convert document with OCR path (Surya preferred, Tesseract fallback)."""
-    patched_count = _patch_surya_cached_config_if_needed()
-    if patched_count:
-        print(f"🛠️  Patched Surya config in {patched_count} cached model file(s)")
-
+    """Convert document with OCR path (RapidOCR preferred, Tesseract fallback)."""
     converter = DocumentConverter(format_options=_format_options)
     try:
         result = converter.convert(tmp_path)
         return result, converter
-    except AttributeError as exc:
-        # Known Surya/transformers incompatibility in some environments:
-        # "SuryaDecoderConfig has no attribute pad_token_id".
-        if "pad_token_id" not in str(exc):
-            raise
-
-        print("⚠️  Surya OCR init failed with pad_token_id error; attempting self-heal")
-        patched_after_failure = _patch_surya_cached_config_if_needed()
-
-        if patched_after_failure:
-            print(f"🛠️  Patched Surya config in {patched_after_failure} cached model file(s); retrying Surya")
-            converter = DocumentConverter(format_options=_format_options)
-            try:
-                result = converter.convert(tmp_path)
-                return result, converter
-            except AttributeError as exc_retry:
-                if "pad_token_id" not in str(exc_retry):
-                    raise
-
-                print("⚠️  Surya retry still failed; falling back to Tesseract OCR")
-                converter = DocumentConverter(format_options=_fallback_format_options)
-                result = converter.convert(tmp_path)
-                return result, converter
-
-        print("⚠️  No patchable Surya config found; falling back to Tesseract OCR")
+    except Exception as exc:
+        print(f"⚠️  Fast OCR init failed ({exc}); falling back to Tesseract OCR")
         converter = DocumentConverter(format_options=_fallback_format_options)
         result = converter.convert(tmp_path)
         return result, converter
-
-
-def _patch_surya_cached_config_if_needed() -> int:
-    """
-    Surya model config compatibility fix.
-
-    In some docling-surya/surya-ocr combinations, the decoder config loaded from
-    cache misses `decoder.pad_token_id`, which causes:
-      AttributeError: 'SuryaDecoderConfig' object has no attribute 'pad_token_id'
-
-    If top-level `pad_token_id` exists, copy it into `decoder.pad_token_id`.
-    Returns number of files patched.
-    """
-    base = Path.home() / ".cache" / "docling" / "models" / "SuryaOcr" / "text_recognition"
-    if not base.exists():
-        return 0
-
-    patched = 0
-    for cfg_path in sorted(base.glob("*/config.json")):
-        try:
-            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-            decoder = cfg.get("decoder")
-            top_level_pad = cfg.get("pad_token_id")
-            if isinstance(decoder, dict) and "pad_token_id" not in decoder and top_level_pad is not None:
-                decoder["pad_token_id"] = top_level_pad
-                cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-                patched += 1
-        except Exception:
-            # Non-fatal: if patching fails, fallback path still handles extraction.
-            pass
-
-    return patched
 
 
 def extract_and_chunk(

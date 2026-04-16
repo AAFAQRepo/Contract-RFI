@@ -1,9 +1,8 @@
 """
 Embedding service.
 
-Uses multilingual-e5-large-instruct to generate dense vector embeddings.
-Query prefix:    "query: {text}"
-Document prefix: "passage: {text}"
+Uses Alibaba-NLP/gte-multilingual-base to generate dense vector embeddings.
+Dimension: 768. No query/passage prefixes required.
 
 Stores retrieval chunk embeddings in Qdrant.
 """
@@ -29,8 +28,11 @@ def get_embedding_model() -> SentenceTransformer:
         import logging
         logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
         print(f"⏳ Loading embedding model: {settings.EMBEDDING_MODEL}")
-        _model = SentenceTransformer(settings.EMBEDDING_MODEL)
-        _model.max_seq_length = 512
+        _model = SentenceTransformer(
+            settings.EMBEDDING_MODEL,
+            trust_remote_code=True,
+        )
+        _model.max_seq_length = 8192  # gte-multilingual-base supports long context
         print("✅ Embedding model loaded")
     return _model
 
@@ -38,17 +40,16 @@ def get_embedding_model() -> SentenceTransformer:
 # ── Encoding helpers ──────────────────────────────────────────────────
 
 def embed_passages(texts: list[str]) -> list[list[float]]:
-    """Embed document passages (with 'passage: ' prefix)."""
+    """Embed document passages. gte-multilingual-base needs no prefix."""
     model = get_embedding_model()
-    prefixed = [f"passage: {t}" for t in texts]
-    embeddings = model.encode(prefixed, normalize_embeddings=True, show_progress_bar=True, batch_size=128)
+    embeddings = model.encode(texts, normalize_embeddings=True, show_progress_bar=True, batch_size=64)
     return embeddings.tolist()
 
 
 def embed_query(text: str) -> list[float]:
-    """Embed a single query (with 'query: ' prefix)."""
+    """Embed a single query. gte-multilingual-base needs no prefix."""
     model = get_embedding_model()
-    embedding = model.encode(f"query: {text}", normalize_embeddings=True)
+    embedding = model.encode(text, normalize_embeddings=True)
     return embedding.tolist()
 
 

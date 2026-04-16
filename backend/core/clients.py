@@ -38,23 +38,34 @@ qdrant_client = QdrantClient(
 )
 
 QDRANT_COLLECTION = "text_chunks"
-EMBEDDING_DIMENSION = 1024  # multilingual-e5-large-instruct output dimension
+EMBEDDING_DIMENSION = 768  # Alibaba-NLP/gte-multilingual-base output dimension
 
 
 def init_qdrant():
-    """Create the text_chunks collection if it doesn't exist."""
+    """Create (or recreate) the text_chunks collection with the correct dimension."""
     collections = [c.name for c in qdrant_client.get_collections().collections]
-    if QDRANT_COLLECTION not in collections:
-        qdrant_client.create_collection(
-            collection_name=QDRANT_COLLECTION,
-            vectors_config=VectorParams(
-                size=EMBEDDING_DIMENSION,
-                distance=Distance.COSINE,
-            ),
-        )
-        print(f"✅ Created Qdrant collection: {QDRANT_COLLECTION}")
-    else:
-        print(f"✅ Qdrant collection exists: {QDRANT_COLLECTION}")
+    if QDRANT_COLLECTION in collections:
+        # Check stored dimension — recreate if it doesn't match
+        info = qdrant_client.get_collection(QDRANT_COLLECTION)
+        stored_dim = info.config.params.vectors.size
+        if stored_dim != EMBEDDING_DIMENSION:
+            print(
+                f"⚠️  Qdrant collection '{QDRANT_COLLECTION}' has dimension {stored_dim}, "
+                f"expected {EMBEDDING_DIMENSION}. Recreating..."
+            )
+            qdrant_client.delete_collection(collection_name=QDRANT_COLLECTION)
+        else:
+            print(f"✅ Qdrant collection exists with correct dimension ({EMBEDDING_DIMENSION})")
+            return
+
+    qdrant_client.create_collection(
+        collection_name=QDRANT_COLLECTION,
+        vectors_config=VectorParams(
+            size=EMBEDDING_DIMENSION,
+            distance=Distance.COSINE,
+        ),
+    )
+    print(f"✅ Created Qdrant collection: {QDRANT_COLLECTION} (dim={EMBEDDING_DIMENSION})")
 
 
 # ── Redis Client ──

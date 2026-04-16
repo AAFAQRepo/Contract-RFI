@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     SGLANG_USE_FORM_DATA: bool = False
 
     # ── Embedding ──
-    EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large-instruct"
+    EMBEDDING_MODEL: str = "Alibaba-NLP/gte-multilingual-base"
 
     # ── Reranker ──
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"

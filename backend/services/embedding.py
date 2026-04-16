@@ -29,7 +29,8 @@ def get_embedding_model() -> SentenceTransformer:
         import logging
         logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
         print(f"⏳ Loading embedding model: {settings.EMBEDDING_MODEL}")
-        _model = SentenceTransformer(settings.EMBEDDING_MODEL)
+        # Force local files only to completely bypass any HuggingFace API network checks
+        _model = SentenceTransformer(settings.EMBEDDING_MODEL, local_files_only=True)
         _model.max_seq_length = 512
         print("✅ Embedding model loaded")
     return _model

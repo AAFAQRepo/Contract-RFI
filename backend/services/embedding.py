@@ -30,8 +30,8 @@ def get_embedding_model() -> SentenceTransformer:
         logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
         print(f"⏳ Loading embedding model: {settings.EMBEDDING_MODEL}")
         # Force local files only to completely bypass any HuggingFace API network checks
-        _model = SentenceTransformer(settings.EMBEDDING_MODEL, local_files_only=True)
-        _model.max_seq_length = 512
+        _model = SentenceTransformer(settings.EMBEDDING_MODEL, trust_remote_code=True, local_files_only=True)
+        _model.max_seq_length = 8192
         print("✅ Embedding model loaded")
     return _model
 
@@ -39,17 +39,16 @@ def get_embedding_model() -> SentenceTransformer:
 # ── Encoding helpers ──────────────────────────────────────────────────
 
 def embed_passages(texts: list[str]) -> list[list[float]]:
-    """Embed document passages (with 'passage: ' prefix)."""
+    """Embed document passages."""
     model = get_embedding_model()
-    prefixed = [f"passage: {t}" for t in texts]
-    embeddings = model.encode(prefixed, normalize_embeddings=True, show_progress_bar=True, batch_size=128)
+    embeddings = model.encode(texts, normalize_embeddings=True, show_progress_bar=True, batch_size=128)
     return embeddings.tolist()
 
 
 def embed_query(text: str) -> list[float]:
-    """Embed a single query (with 'query: ' prefix)."""
+    """Embed a single query."""
     model = get_embedding_model()
-    embedding = model.encode(f"query: {text}", normalize_embeddings=True)
+    embedding = model.encode(text, normalize_embeddings=True)
     return embedding.tolist()
 
 

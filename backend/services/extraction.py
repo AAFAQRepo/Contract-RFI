@@ -148,9 +148,13 @@ def _build_lc_docs_from_document(document: Any) -> list[_ChunkDoc]:
     Build LangChain-like docs directly from an already-converted Docling document.
     This avoids a second full conversion pass in DoclingLoader.
     """
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL, trust_remote_code=True)
+
     chunker = HybridChunker(
-        tokenizer=settings.EMBEDDING_MODEL,
-        max_tokens=512,  # multilingual-e5-large-instruct max sequence length
+        tokenizer=tokenizer,
+        max_tokens=600,
+        merge_peers=True,
     )
 
     try:
@@ -331,8 +335,9 @@ def extract_and_chunk(
             export_type=ExportType.DOC_CHUNKS,
             converter=converter,
             chunker=HybridChunker(
-                tokenizer=settings.EMBEDDING_MODEL,
-                max_tokens=512,
+                tokenizer=AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL, trust_remote_code=True),
+                max_tokens=600,
+                merge_peers=True,
             ),
         )
         lc_docs = loader.load()

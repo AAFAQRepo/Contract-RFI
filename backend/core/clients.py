@@ -38,7 +38,7 @@ qdrant_client = QdrantClient(
 )
 
 QDRANT_COLLECTION = "text_chunks"
-EMBEDDING_DIMENSION = 1024  # multilingual-e5-large-instruct output dimension
+EMBEDDING_DIMENSION = 768  # Alibaba-NLP/gte-multilingual-base output dimension
 
 
 def init_qdrant():

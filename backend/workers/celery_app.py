@@ -44,18 +44,19 @@ celery_app.conf.update(
 )
 
 
-# ── Pre-warm GPU models on worker startup ─────────────────────────────
-from celery.signals import worker_init  # noqa: E402
+# ── Pre-warm GPU models in child worker processes ─────────────────────
+from celery.signals import worker_process_init  # noqa: E402
 
 
-@worker_init.connect
+@worker_process_init.connect
 def _preload_models(**kwargs):
-    """Load the embedding model into GPU memory at worker boot time.
-    Eliminates the ~3s cold-start penalty on the first document."""
+    """Load the embedding model into GPU memory when the worker process starts.
+    This runs in the child process, which is safe for CUDA initialization
+    and eliminates the ~3s cold-start penalty on the first document."""
     try:
         from services.embedding import get_embedding_model
         get_embedding_model()
-        print("🔥 Embedding model pre-warmed on worker startup")
+        print("🔥 Embedding model pre-warmed in worker process")
     except Exception as exc:
         print(f"⚠️  Could not pre-warm embedding model: {exc}")
 

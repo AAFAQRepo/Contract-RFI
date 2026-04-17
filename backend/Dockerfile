@@ -10,7 +10,7 @@ ENV VIRTUAL_ENV=/opt/venv
 
 WORKDIR /app
 
-# Install Python 3.12 and system dependencies
+# Install Python 3.12, system dependencies, and uv
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.12 \
     python3-pip \
@@ -29,20 +29,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Install uv for fast Python package resolution and installation
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
 # Create and activate virtual environment
 RUN python3.12 -m venv $VIRTUAL_ENV
 # Add venv to PATH so 'python' and 'pip' use it automatically
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# Upgrade pip inside the venv
-RUN pip install --no-cache-dir --upgrade pip
-
 # Install PyTorch specifically for CUDA 12.4+
-RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+RUN uv pip install --no-cache torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 # Install the rest of the requirements
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN uv pip install --no-cache -r requirements.txt
 
 # Copy application code
 COPY . .

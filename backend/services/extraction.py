@@ -256,8 +256,6 @@ def _run_mineru(
     MinerU writes output under:
         <tmp_dir>/<stem>/<parse_method>/<stem>.md
     """
-    from mineru.cli.common import do_parse
-
     stem = Path(filename).stem or "document"
     ext = Path(filename).suffix.lower() or ".pdf"
     input_path = os.path.join(tmp_dir, f"{stem}{ext}")
@@ -269,12 +267,16 @@ def _run_mineru(
     safe_stem = stem[:80]  # avoid overly long paths
 
     # ── Speed Optimization ─────────────────────────────────────────────
-    # If it's a digital PDF, we force parse_method="txt" to completely
-    # bypass the 6-second model init and heavy layout ML pipeline.
+    # If it's a digital PDF, we force parse_method="txt" and disable heavy models.
     parse_method = "auto"
     if _is_text_native_pdf(file_bytes, ext):
         parse_method = "txt"
-        print("⚡ Text-native PDF detected. Using MinerU 'txt' method for high-speed parsing.")
+        os.environ["MINERU_FORMULA_ENABLE"] = "false"
+        os.environ["MINERU_LAYOUT_ENABLE"] = "false"
+        os.environ["MINERU_TABLE_ENABLE"] = "false"
+        print("⚡ Text-native PDF detected. High-speed 'txt' path enabled (MFR/Layout disabled).")
+
+    from mineru.cli.common import do_parse
 
     do_parse(
         output_dir=tmp_dir,

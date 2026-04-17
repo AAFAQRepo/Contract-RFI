@@ -293,33 +293,41 @@ def _run_mineru(
     )
 
     # ── Locate output files properly ───────────────────────────────────
-    # MinerU creates: <output_dir>/<safe_stem>/<parse_method>/...
+    # MinerU 3.0 creates: <output_dir>/<safe_stem>/<parse_method>/...
+    # We use a robust glob search to find the files regardless of nesting.
     md_path = ""
     cl_path = ""
+    
+    # Precise search under the expected safe_stem directory first
+    search_root = Path(tmp_dir) / safe_stem
+    if not search_root.exists():
+        search_root = Path(tmp_dir)
 
-    # Deep recursive search since MinerU nests output dirs
-    for root, _, files in os.walk(tmp_dir):
-        for fname in files:
-            if fname.endswith(".md") and not md_path:
-                md_path = os.path.join(root, fname)
-            elif fname in ("content_list.json", "content_list_v2.json") and not cl_path:
-                cl_path = os.path.join(root, fname)
+    # Find the largest .md file (usually the final output)
+    md_files = sorted(search_root.rglob("*.md"), key=lambda p: p.stat().st_size, reverse=True)
+    if md_files:
+        md_path = str(md_files[0])
+    
+    # Find the best content_list.json (v2 preferred, then v1)
+    cl_files = sorted(search_root.rglob("content_list*.json"), key=lambda p: p.name, reverse=True)
+    if cl_files:
+        cl_path = str(cl_files[0])
 
     # Read markdown
     markdown = ""
-    if os.path.exists(md_path):
+    if md_path and os.path.exists(md_path):
         with open(md_path, "r", encoding="utf-8") as f:
             markdown = f.read()
     else:
-        print("⚠️  MinerU: markdown output file not found; using empty text")
+        print(f"⚠️  MinerU: No .md files found in {search_root}")
 
     # Read content_list
     content_list: list[dict] = []
-    if os.path.exists(cl_path):
+    if cl_path and os.path.exists(cl_path):
         with open(cl_path, "r", encoding="utf-8") as f:
             content_list = json.load(f)
     else:
-        print("⚠️  MinerU: content_list.json not found; chunking will fall back to raw markdown split")
+        print(f"⚠️  MinerU: No content_list.json found in {search_root}. Chunking will fall back to raw markdown split.")
 
     # PostgreSQL cannot store NUL bytes in TEXT columns
     markdown = markdown.replace("\x00", "")

@@ -219,6 +219,31 @@ def _count_pages_from_content_list(content_list: list[dict]) -> int:
 # MinerU parse wrapper
 # ─────────────────────────────────────────────────────────────────────────
 
+def _is_text_native_pdf(file_bytes: bytes, ext: str) -> bool:
+    """Quickly check if a PDF is digital/text-native to bypass OCR models."""
+    if ext != ".pdf":
+        return False
+    try:
+        import fitz # PyMuPDF
+        doc = fitz.open("pdf", file_bytes)
+        text_len = 0
+        num_pages = len(doc)
+        if num_pages == 0:
+            return False
+            
+        # Check up to first 3 pages
+        check_pages = min(3, num_pages)
+        for i in range(check_pages):
+            text_len += len(doc[i].get_text("text").strip())
+        doc.close()
+        
+        # If we average > 150 chars per page, it's highly likely text-native
+        return (text_len / check_pages) > 150
+    except Exception as e:
+        print(f"⚠️ PyMuPDF fast-check failed: {e}")
+        return False
+
+
 def _run_mineru(
     file_bytes: bytes,
     filename: str,
@@ -229,8 +254,7 @@ def _run_mineru(
     (markdown_text, content_list).
 
     MinerU writes output under:
-        <tmp_dir>/<stem>/<stem>.md
-        <tmp_dir>/<stem>/content_list.json
+        <tmp_dir>/<stem>/<parse_method>/<stem>.md
     """
     from mineru.cli.common import do_parse
 
@@ -244,13 +268,21 @@ def _run_mineru(
     # Build safe basename for MinerU output naming
     safe_stem = stem[:80]  # avoid overly long paths
 
+    # ── Speed Optimization ─────────────────────────────────────────────
+    # If it's a digital PDF, we force parse_method="txt" to completely
+    # bypass the 6-second model init and heavy layout ML pipeline.
+    parse_method = "auto"
+    if _is_text_native_pdf(file_bytes, ext):
+        parse_method = "txt"
+        print("⚡ Text-native PDF detected. Using MinerU 'txt' method for high-speed parsing.")
+
     do_parse(
         output_dir=tmp_dir,
         pdf_file_names=[safe_stem],
         pdf_bytes_list=[file_bytes],
-        p_lang_list=["en"],         # OCR language (en works well for Latin-script docs)
-        backend="pipeline",         # CPU-safe; set to "vlm-transformers" for GPU
-        parse_method="auto",        # auto selects txt-extract vs OCR per page
+        p_lang_list=["en"],         # OCR language
+        backend="pipeline",         # CPU-safe; models load only if needed
+        parse_method=parse_method,  
         f_dump_md=True,
         f_dump_content_list=True,
         f_dump_middle_json=False,
@@ -260,33 +292,18 @@ def _run_mineru(
         f_draw_span_bbox=False,
     )
 
-    # ── Locate output files ────────────────────────────────────────────
-    # MinerU creates: <output_dir>/<safe_stem>/<safe_stem>.md
-    doc_dir = os.path.join(tmp_dir, safe_stem)
+    # ── Locate output files properly ───────────────────────────────────
+    # MinerU creates: <output_dir>/<safe_stem>/<parse_method>/...
+    md_path = ""
+    cl_path = ""
 
-    md_path = os.path.join(doc_dir, f"{safe_stem}.md")
-    cl_path = os.path.join(doc_dir, "content_list.json")
-
-    # Fallback: search recursively if naming differs between versions
-    if not os.path.exists(md_path):
-        for root, _, files in os.walk(tmp_dir):
-            for fname in files:
-                if fname.endswith(".md"):
-                    md_path = os.path.join(root, fname)
-                    break
-            else:
-                continue
-            break
-
-    if not os.path.exists(cl_path):
-        for root, _, files in os.walk(tmp_dir):
-            for fname in files:
-                if fname == "content_list.json":
-                    cl_path = os.path.join(root, fname)
-                    break
-            else:
-                continue
-            break
+    # Deep recursive search since MinerU nests output dirs
+    for root, _, files in os.walk(tmp_dir):
+        for fname in files:
+            if fname.endswith(".md") and not md_path:
+                md_path = os.path.join(root, fname)
+            elif fname in ("content_list.json", "content_list_v2.json") and not cl_path:
+                cl_path = os.path.join(root, fname)
 
     # Read markdown
     markdown = ""

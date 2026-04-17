@@ -190,6 +190,7 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
 
     except Exception as exc:
         print(f"❌ Processing failed for {document_id}: {exc}")
+        session.rollback()  # reset transaction after DB error
         _update_status(session, "error", str(exc))
         session.commit()
         # Retry with exponential backoff

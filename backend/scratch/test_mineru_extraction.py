@@ -17,9 +17,6 @@ import os
 import sys
 import time
 
-# Ensure env is set before any mineru imports
-os.environ.setdefault("MINERU_MODEL_SOURCE", "local")
-
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

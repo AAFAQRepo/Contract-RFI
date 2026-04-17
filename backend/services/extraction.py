@@ -31,11 +31,6 @@ from pathlib import Path
 
 from core.config import get_settings
 
-# ── MinerU must read MINERU_MODEL_SOURCE before package-level init ──────
-# Pull from env (set in .env → loaded by the settings object) so the var
-# is present when mineru internals import at function-call time.
-os.environ.setdefault("MINERU_MODEL_SOURCE", "local")
-
 settings = get_settings()
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -253,7 +248,7 @@ def _run_mineru(
         output_dir=tmp_dir,
         pdf_file_names=[safe_stem],
         pdf_bytes_list=[file_bytes],
-        p_lang_list=["auto"],       # language auto-detect
+        p_lang_list=["en"],         # OCR language (en works well for Latin-script docs)
         backend="pipeline",         # CPU-safe; set to "vlm-transformers" for GPU
         parse_method="auto",        # auto selects txt-extract vs OCR per page
         f_dump_md=True,
@@ -279,6 +274,9 @@ def _run_mineru(
                 if fname.endswith(".md"):
                     md_path = os.path.join(root, fname)
                     break
+            else:
+                continue
+            break
 
     if not os.path.exists(cl_path):
         for root, _, files in os.walk(tmp_dir):
@@ -286,6 +284,9 @@ def _run_mineru(
                 if fname == "content_list.json":
                     cl_path = os.path.join(root, fname)
                     break
+            else:
+                continue
+            break
 
     # Read markdown
     markdown = ""
@@ -302,6 +303,9 @@ def _run_mineru(
             content_list = json.load(f)
     else:
         print("⚠️  MinerU: content_list.json not found; chunking will fall back to raw markdown split")
+
+    # PostgreSQL cannot store NUL bytes in TEXT columns
+    markdown = markdown.replace("\x00", "")
 
     return markdown, content_list
 
@@ -405,6 +409,11 @@ def extract_and_chunk(
 
         if not lc_docs:
             raise RuntimeError("No chunks produced from MinerU output")
+
+        # ── 4. Sanitize NUL bytes (PostgreSQL rejects them in TEXT) ────
+        full_text = full_text.replace("\x00", "")
+        for doc in lc_docs:
+            doc.page_content = doc.page_content.replace("\x00", "")
 
         t_total = time.time() - t0
         print(f"✅ MinerU: {page_count} pages | {len(lc_docs)} chunks | "

@@ -105,14 +105,16 @@ def store_chunks_in_qdrant(
     return point_ids
 
 
-def store_docling_chunks_in_qdrant(
-    lc_docs: list,       # LangChain Document objects from DoclingLoader
+def store_parsed_chunks_in_qdrant(
+    lc_docs: list,       # _ChunkDoc objects from extraction service
     document_id: str,
     user_id: str,
     language: str,
 ) -> list[str]:
     """
-    Embed Docling-produced LangChain Document chunks and upsert into Qdrant.
+    Embed parsed document chunks (_ChunkDoc / LangChain-compatible) and
+    upsert into Qdrant.  Works with any parser backend (MinerU, Docling, etc.)
+    that produces objects with .page_content and .metadata["dl_meta"].
     Returns list of Qdrant point IDs.
     """
     if not lc_docs:
@@ -170,5 +172,5 @@ def store_docling_chunks_in_qdrant(
         batch = points[i : i + batch_size]
         qdrant_client.upsert(collection_name=QDRANT_COLLECTION, points=batch)
 
-    print(f"✅ Stored {len(points)} Docling vectors in Qdrant")
+    print(f"✅ Stored {len(points)} vectors in Qdrant")
     return point_ids

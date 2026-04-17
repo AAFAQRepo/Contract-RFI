@@ -3,12 +3,11 @@ Celery async tasks for document processing.
 
 process_document — full ingestion pipeline:
   1. Download file from MinIO
-  2. Three-tier extraction: Lean → Enriched (FAST tables) → OCR
+  2. Extract + chunk with MinerU (pipeline backend, parse_method=auto)
   3. Detect language
-  4. Chunk with Docling HybridChunker
-  5. Embed chunks → Qdrant
-  6. Store chunks → PostgreSQL
-  7. Update document status
+  4. Embed chunks → Qdrant
+  5. Store chunks → PostgreSQL
+  6. Update document status
 """
 
 import os
@@ -71,7 +70,8 @@ def test_task(message: str) -> dict:
 def process_document(self, document_id: str, user_id: str, object_name: str, filename: str):
     """
     Full async ingestion pipeline for a single document.
-    Uses Docling three-tier pipeline (Lean → Enriched → OCR) + HybridChunker.
+    Uses MinerU pipeline backend (auto parse_method: txt for digital PDFs,
+    OCR for scanned docs) + rule-based chunker over content_list.json.
     """
     import uuid as _uuid
     from sqlalchemy import create_engine
@@ -81,7 +81,7 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
     from services.storage import download_document
     from services.extraction import extract_and_chunk
     from services.language import detect_language
-    from services.embedding import store_docling_chunks_in_qdrant
+    from services.embedding import store_parsed_chunks_in_qdrant
 
     # Sync engine for Celery (not async)
     engine = create_engine(settings.DATABASE_URL_SYNC)
@@ -116,8 +116,8 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
         file_bytes = download_document(object_name)
         _update_status(session, "processing", step="Extracting text", progress=30)
 
-        # 2. Extract + chunk with Docling (single call!)
-        print(f"📄 Extracting and chunking {filename}")
+        # 2. Extract + chunk with MinerU (single call)
+        print(f"📄 Extracting and chunking {filename} (MinerU)")
         lc_docs, full_text, page_count = extract_and_chunk(file_bytes, filename)
         _update_status(session, "processing", step="Detecting language", progress=50)
 
@@ -137,7 +137,7 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
 
         # 5. Embed + store chunks in Qdrant
         print(f"🔢 Embedding {len(lc_docs)} chunks...")
-        point_ids = store_docling_chunks_in_qdrant(lc_docs, document_id, user_id, language)
+        point_ids = store_parsed_chunks_in_qdrant(lc_docs, document_id, user_id, language)
         _update_status(session, "processing", step="Saving to database", progress=90)
 
         # 6. Store chunks in PostgreSQL for reference

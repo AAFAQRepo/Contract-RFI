@@ -1,111 +1,46 @@
 """
-Document extraction + chunking service — powered by Docling.
+Document extraction + chunking service — powered by MinerU.
 
 Single entry point:
     extract_and_chunk(file_bytes, filename)
         → (lc_docs, full_text, page_count)
 
-Handles all formats (PDF, DOCX, PPTX, images) with:
-  - Three-tier pipeline: Lean → Enriched (FAST tables) → OCR
-  - RapidOCR for scanned / image-based documents
-  - HybridChunker for document-aware chunking
+Handles all formats (PDF, DOCX, images) with:
+  - MinerU `pipeline` backend (CPU-safe, macOS-compatible)
+  - parse_method="auto"  → auto-detects text-native vs scanned/OCR PDFs
+  - Rule-based chunker over MinerU's content_list.json for rich metadata
 
-Pipeline tiers:
-  Tier 1 "Lean"     — No OCR, no table structure.  Fastest.
-  Tier 2 "Enriched" — No OCR, FAST table structure. For table-heavy docs.
-  Tier 3 "OCR"      — RapidOCR (fallback: Tesseract). For scanned docs.
+Output metadata shape is intentionally kept identical to the former
+Docling-based pipeline so downstream embedding.py / celery_app.py code
+requires no changes:
+    metadata = {
+        "dl_meta": {
+            "headings": [<section_heading>],
+            "doc_items": [{"prov": [{"page_no": <int>}]}],
+        }
+    }
 """
 
+import json
 import os
-import time
+import shutil
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import (
-    PdfPipelineOptions,
-    RapidOcrOptions,
-    TableFormerMode,
-    TableStructureOptions,
-    TesseractCliOcrOptions,
-)
-from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling.chunking import HybridChunker
-from langchain_docling import DoclingLoader
-from langchain_docling.loader import ExportType
-from transformers import AutoTokenizer
 
 from core.config import get_settings
 
+# ── MinerU must read MINERU_MODEL_SOURCE before package-level init ──────
+# Pull from env (set in .env → loaded by the settings object) so the var
+# is present when mineru internals import at function-call time.
+os.environ.setdefault("MINERU_MODEL_SOURCE", "local")
+
 settings = get_settings()
 
-# ── Pipeline options (configured once) ────────────────────────────────
-
-# Tier 1 — Lean: no OCR, no table structure.  Maximum speed.
-_lean_pipeline_options = PdfPipelineOptions(
-    do_ocr=False,
-    do_table_structure=False,
-    generate_page_images=False,
-    generate_picture_images=False,
-    allow_external_plugins=False,
-)
-
-_lean_format_options = {
-    InputFormat.PDF: PdfFormatOption(pipeline_options=_lean_pipeline_options),
-}
-
-# Tier 2 — Enriched: no OCR, but FAST table structure for table-heavy docs.
-_enriched_pipeline_options = PdfPipelineOptions(
-    do_ocr=False,
-    do_table_structure=True,
-    generate_page_images=False,
-    generate_picture_images=False,
-    allow_external_plugins=False,
-)
-_enriched_pipeline_options.table_structure_options = TableStructureOptions(
-    mode=TableFormerMode.FAST,
-)
-
-_enriched_format_options = {
-    InputFormat.PDF: PdfFormatOption(pipeline_options=_enriched_pipeline_options),
-}
-
-# Tier 3a — OCR primary (RapidOCR - Fast & Light)
-_ocr_pipeline_options = PdfPipelineOptions(
-    do_ocr=True,
-    do_table_structure=True,
-    allow_external_plugins=False,
-    generate_page_images=False,
-    generate_picture_images=False,
-    ocr_options=RapidOcrOptions(),
-)
-_ocr_pipeline_options.table_structure_options = TableStructureOptions(
-    mode=TableFormerMode.FAST,
-)
-
-_ocr_format_options = {
-    InputFormat.PDF: PdfFormatOption(pipeline_options=_ocr_pipeline_options),
-    InputFormat.IMAGE: PdfFormatOption(pipeline_options=_ocr_pipeline_options),
-}
-
-# Tier 3b — OCR fallback (Tesseract CLI)
-_fallback_pipeline_options = PdfPipelineOptions(
-    do_ocr=True,
-    ocr_model="tesseractcli",
-    allow_external_plugins=False,
-    generate_page_images=False,
-    generate_picture_images=False,
-    # Tesseract uses ISO-639-2 language codes.
-    ocr_options=TesseractCliOcrOptions(lang=["eng", "ara", "hin"]),
-)
-
-_fallback_format_options = {
-    InputFormat.PDF: PdfFormatOption(pipeline_options=_fallback_pipeline_options),
-    InputFormat.IMAGE: PdfFormatOption(pipeline_options=_fallback_pipeline_options),
-}
-
+# ─────────────────────────────────────────────────────────────────────────
+# Internal data types
+# ─────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class _ChunkDoc:
@@ -114,273 +49,369 @@ class _ChunkDoc:
     metadata: dict
 
 
-def _get_page_count(result: Any) -> int:
-    """Extract page count from a docling ConversionResult."""
-    if hasattr(result.document, "pages") and result.document.pages:
-        return len(result.document.pages)
-    if hasattr(result, "pages"):
-        return len(result.pages)
-    return _estimate_page_count(result.document)
+# ─────────────────────────────────────────────────────────────────────────
+# Chunking helpers
+# ─────────────────────────────────────────────────────────────────────────
+
+_MAX_WORDS = 600          # Approx token budget per chunk
+_MIN_WORDS = 30           # Merge chunks shorter than this into the next
 
 
-def _should_enable_ocr(ext: str, full_text: str, page_count: int) -> bool:
+def _estimate_words(text: str) -> int:
+    return len(text.split())
+
+
+def _heading_from_block(block: dict) -> str | None:
     """
-    Decide whether OCR is needed after a no-OCR parse.
-    Uses simple text-density heuristics for PDFs.
+    Extract heading text from a MinerU content_list block.
+    MinerU marks headings with type='text' and level in {1,2,3,...}
+    or type='title'.
     """
-    if ext != ".pdf":
-        return False
-
-    text_len = len((full_text or "").strip())
-    pages = max(page_count or 1, 1)
-    chars_per_page = text_len / pages
-
-    # Scanned PDFs often have very low extracted text density without OCR.
-    return text_len < 1200 or chars_per_page < 180
-
-
-def _needs_table_enrichment(document: Any) -> bool:
-    """
-    Check whether the lean-parsed document contains enough table blocks
-    to warrant a second pass with FAST table-structure extraction.
-
-    The lean pipeline still runs layout detection, which tags content blocks
-    as "table" — it just doesn't reconstruct row/column structure.
-    We count those tags here and decide whether the enriched pass is worth it.
-    """
-    table_count = 0
-    # Docling stores items in document.body (list of DocItem)
-    for item in getattr(document, "body", []):
-        label = getattr(item, "label", None) or getattr(item, "content_type", "")
-        if "table" in str(label).lower():
-            table_count += 1
-    # Only pay the TableFormer cost if there are meaningful tables.
-    return table_count >= 3
-
-
-def _to_dict_safe(value: Any) -> dict | None:
-    """Best-effort conversion of pydantic/dataclass-like objects to dict."""
-    if value is None:
-        return None
-    if isinstance(value, dict):
-        return value
-    if hasattr(value, "model_dump"):
-        try:
-            return value.model_dump()
-        except Exception:
-            return None
-    if hasattr(value, "dict"):
-        try:
-            return value.dict()
-        except Exception:
-            return None
+    btype = block.get("type", "")
+    if btype in ("title",):
+        return (block.get("text") or "").strip() or None
+    # Some versions use level field for section headings
+    if btype == "text" and block.get("level", 0) in (1, 2):
+        text = (block.get("text") or "").strip()
+        # Heuristic: short text blocks that look like headings
+        if text and len(text) < 120 and not text.endswith("."):
+            return text
     return None
 
 
-def _serialize_chunk(chunker: HybridChunker, chunk: Any) -> str:
-    """Serialize a Docling chunk to text with API compatibility fallbacks."""
-    try:
-        return chunker.serialize(chunk=chunk)
-    except TypeError:
-        pass
-
-    try:
-        return chunker.serialize(chunk)
-    except Exception:
-        pass
-
-    for attr in ("text", "content", "page_content"):
-        value = getattr(chunk, attr, None)
-        if isinstance(value, str) and value.strip():
-            return value
-
-    return str(chunk)
+def _page_from_block(block: dict) -> int:
+    """Extract 1-based page number from a content_list block."""
+    # MinerU content_list uses 'page_id' (0-based in older versions, check both)
+    page_id = block.get("page_id")
+    if page_id is not None:
+        return int(page_id) + 1  # convert to 1-based
+    # Fallback: some versions use 'page_no' directly (1-based)
+    page_no = block.get("page_no")
+    if page_no is not None:
+        return int(page_no)
+    return 0
 
 
-def _build_lc_docs_from_document(document: Any) -> list[_ChunkDoc]:
+def _block_text(block: dict) -> str:
+    """Get the rendered text of a content block."""
+    btype = block.get("type", "")
+    # Tables are already rendered as markdown by MinerU
+    if btype == "table":
+        return (block.get("table_caption") or "") + "\n" + (block.get("table_body") or "")
+    # Images: use caption only
+    if btype in ("image", "figure"):
+        return (block.get("img_caption") or "").strip()
+    return (block.get("text") or "").strip()
+
+
+def _build_chunks_from_content_list(
+    content_list: list[dict],
+) -> list[_ChunkDoc]:
     """
-    Build LangChain-like docs directly from an already-converted Docling document.
-    This avoids a second full conversion pass in DoclingLoader.
+    Convert MinerU's content_list into _ChunkDoc objects.
+
+    Strategy:
+      - Walk blocks in reading order.
+      - Track the current section heading.
+      - Accumulate text until _MAX_WORDS is reached, then flush.
+      - Blocks shorter than _MIN_WORDS are merged with the next.
     """
-    tokenizer = AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL, trust_remote_code=True)
+    chunks: list[_ChunkDoc] = []
+    current_heading = ""
+    current_page = 0
+    buffer_texts: list[str] = []
+    buffer_page = 0
 
-    chunker = HybridChunker(
-        tokenizer=tokenizer,
-        max_tokens=600,
-        merge_peers=True,
-    )
+    def _flush():
+        nonlocal buffer_texts, buffer_page
+        text = "\n\n".join(t for t in buffer_texts if t).strip()
+        if not text:
+            buffer_texts = []
+            return
+        chunks.append(
+            _ChunkDoc(
+                page_content=text,
+                metadata={
+                    "dl_meta": {
+                        "headings": [current_heading] if current_heading else [],
+                        "doc_items": [{"prov": [{"page_no": buffer_page}]}],
+                    }
+                },
+            )
+        )
+        buffer_texts = []
 
-    try:
-        chunks_iter = chunker.chunk(dl_doc=document)
-    except TypeError:
-        chunks_iter = chunker.chunk(document)
+    for block in content_list:
+        btype = block.get("type", "")
+        page = _page_from_block(block)
+        if page:
+            current_page = page
 
-    out: list[_ChunkDoc] = []
-    for chunk in chunks_iter:
-        text = _serialize_chunk(chunker, chunk).strip()
+        # Update running heading tracker
+        heading = _heading_from_block(block)
+        if heading:
+            current_heading = heading
+            # Flush any accumulated text before starting new section
+            _flush()
+            buffer_page = current_page
+            # Include heading as first line of new chunk
+            buffer_texts.append(f"## {heading}")
+            continue
+
+        # Skip empty / pure image blocks with no caption
+        text = _block_text(block)
         if not text:
             continue
 
-        headings: list[str] = []
-        doc_items: list[dict] = []
+        # If buffer is empty, record the starting page
+        if not buffer_texts:
+            buffer_page = current_page
 
-        meta = getattr(chunk, "meta", None)
-        if meta is not None:
-            raw_headings = getattr(meta, "headings", None) or []
-            headings = [str(h) for h in raw_headings if h]
-
-            raw_doc_items = getattr(meta, "doc_items", None) or []
-            for item in raw_doc_items:
-                item_dict = _to_dict_safe(item)
-                if item_dict:
-                    doc_items.append(item_dict)
-
-        out.append(
-            _ChunkDoc(
-                page_content=text,
-                metadata={"dl_meta": {"headings": headings, "doc_items": doc_items}},
+        # Tables always flush before and after (preserve as standalone chunks)
+        if btype == "table":
+            _flush()
+            buffer_page = current_page
+            chunks.append(
+                _ChunkDoc(
+                    page_content=text.strip(),
+                    metadata={
+                        "dl_meta": {
+                            "headings": [current_heading] if current_heading else [],
+                            "doc_items": [{"prov": [{"page_no": current_page}]}],
+                        }
+                    },
+                )
             )
-        )
+            continue
 
-    return out
+        buffer_texts.append(text)
+
+        # Flush when budget exceeded
+        if _estimate_words("\n\n".join(buffer_texts)) >= _MAX_WORDS:
+            _flush()
+            buffer_page = current_page
+
+    _flush()  # Remainder
+
+    # ── Merge tiny trailing chunks ─────────────────────────────────────
+    merged: list[_ChunkDoc] = []
+    for chunk in chunks:
+        if merged and _estimate_words(chunk.page_content) < _MIN_WORDS:
+            # Append to previous chunk
+            prev = merged[-1]
+            prev.page_content = prev.page_content + "\n\n" + chunk.page_content
+        else:
+            merged.append(chunk)
+
+    return merged
 
 
-def _convert_with_ocr(tmp_path: str):
-    """Convert document with OCR path (RapidOCR preferred, Tesseract fallback)."""
-    converter = DocumentConverter(format_options=_ocr_format_options)
-    try:
-        result = converter.convert(tmp_path)
-        return result, converter
-    except Exception as exc:
-        print(f"⚠️  RapidOCR failed ({exc}); falling back to Tesseract OCR")
-        converter = DocumentConverter(format_options=_fallback_format_options)
-        result = converter.convert(tmp_path)
-        return result, converter
+# ─────────────────────────────────────────────────────────────────────────
+# Page-count helper
+# ─────────────────────────────────────────────────────────────────────────
 
+def _count_pages_from_content_list(content_list: list[dict]) -> int:
+    """Derive page count from the max page_id seen in content blocks."""
+    max_page = 0
+    for block in content_list:
+        page = _page_from_block(block)
+        if page > max_page:
+            max_page = page
+    return max_page if max_page > 0 else 1
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# MinerU parse wrapper
+# ─────────────────────────────────────────────────────────────────────────
+
+def _run_mineru(
+    file_bytes: bytes,
+    filename: str,
+    tmp_dir: str,
+) -> tuple[str, list[dict]]:
+    """
+    Write file to tmp_dir, run MinerU do_parse, and return
+    (markdown_text, content_list).
+
+    MinerU writes output under:
+        <tmp_dir>/<stem>/<stem>.md
+        <tmp_dir>/<stem>/content_list.json
+    """
+    from mineru.cli.common import do_parse
+
+    stem = Path(filename).stem or "document"
+    ext = Path(filename).suffix.lower() or ".pdf"
+    input_path = os.path.join(tmp_dir, f"{stem}{ext}")
+
+    with open(input_path, "wb") as f:
+        f.write(file_bytes)
+
+    # Build safe basename for MinerU output naming
+    safe_stem = stem[:80]  # avoid overly long paths
+
+    do_parse(
+        output_dir=tmp_dir,
+        pdf_file_names=[safe_stem],
+        pdf_bytes_list=[file_bytes],
+        p_lang_list=["auto"],       # language auto-detect
+        backend="pipeline",         # CPU-safe; set to "vlm-transformers" for GPU
+        parse_method="auto",        # auto selects txt-extract vs OCR per page
+        f_dump_md=True,
+        f_dump_content_list=True,
+        f_dump_middle_json=False,
+        f_dump_model_json=False,
+        f_dump_orig_pdf=False,
+        f_draw_layout_bbox=False,
+        f_draw_span_bbox=False,
+    )
+
+    # ── Locate output files ────────────────────────────────────────────
+    # MinerU creates: <output_dir>/<safe_stem>/<safe_stem>.md
+    doc_dir = os.path.join(tmp_dir, safe_stem)
+
+    md_path = os.path.join(doc_dir, f"{safe_stem}.md")
+    cl_path = os.path.join(doc_dir, "content_list.json")
+
+    # Fallback: search recursively if naming differs between versions
+    if not os.path.exists(md_path):
+        for root, _, files in os.walk(tmp_dir):
+            for fname in files:
+                if fname.endswith(".md"):
+                    md_path = os.path.join(root, fname)
+                    break
+
+    if not os.path.exists(cl_path):
+        for root, _, files in os.walk(tmp_dir):
+            for fname in files:
+                if fname == "content_list.json":
+                    cl_path = os.path.join(root, fname)
+                    break
+
+    # Read markdown
+    markdown = ""
+    if os.path.exists(md_path):
+        with open(md_path, "r", encoding="utf-8") as f:
+            markdown = f.read()
+    else:
+        print("⚠️  MinerU: markdown output file not found; using empty text")
+
+    # Read content_list
+    content_list: list[dict] = []
+    if os.path.exists(cl_path):
+        with open(cl_path, "r", encoding="utf-8") as f:
+            content_list = json.load(f)
+    else:
+        print("⚠️  MinerU: content_list.json not found; chunking will fall back to raw markdown split")
+
+    return markdown, content_list
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Fallback chunker (when content_list.json is missing)
+# ─────────────────────────────────────────────────────────────────────────
+
+def _chunk_markdown_fallback(markdown: str) -> list[_ChunkDoc]:
+    """
+    Simple markdown-section splitter used when content_list.json is absent.
+    Splits on H1/H2/H3 headings, then enforces max word budget per chunk.
+    """
+    import re
+
+    chunks: list[_ChunkDoc] = []
+    heading_pat = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
+    boundaries = [m.start() for m in heading_pat.finditer(markdown)]
+    boundaries.append(len(markdown))
+
+    sections: list[tuple[str, str]] = []
+    prev = 0
+    prev_heading = ""
+    for i, start in enumerate(boundaries[:-1]):
+        m = heading_pat.match(markdown, start)
+        if m:
+            sections.append((prev_heading, markdown[prev:start]))
+            prev_heading = m.group(2).strip()
+            prev = start
+    sections.append((prev_heading, markdown[prev:]))
+
+    for heading, body in sections:
+        body = body.strip()
+        if not body:
+            continue
+        words = body.split()
+        for i in range(0, max(len(words), 1), _MAX_WORDS):
+            chunk_text = " ".join(words[i : i + _MAX_WORDS])
+            if chunk_text.strip():
+                chunks.append(
+                    _ChunkDoc(
+                        page_content=chunk_text,
+                        metadata={
+                            "dl_meta": {
+                                "headings": [heading] if heading else [],
+                                "doc_items": [{"prov": [{"page_no": 0}]}],
+                            }
+                        },
+                    )
+                )
+    return chunks
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Public API
+# ─────────────────────────────────────────────────────────────────────────
 
 def extract_and_chunk(
     file_bytes: bytes,
     filename: str,
 ) -> tuple[list, str, int]:
     """
-    Extract text from a document and chunk it using Docling's HybridChunker.
+    Extract text from a document and chunk it using MinerU.
 
-    Three-tier pipeline for PDFs:
-      1. Lean parse  (no OCR, no table structure) — fastest
-      2. If tables detected → re-parse with FAST table structure
-      3. If text-sparse  → re-parse with OCR
+    Uses MinerU's `pipeline` backend with `parse_method="auto"`:
+      - Text-native PDFs  → fast text extraction (sub-second per page)
+      - Scanned PDFs      → OCR via layout-analysis + PaddleOCR
+      - DOCX / images     → converted through MinerU's converter chain
 
     Args:
         file_bytes: Raw file content
-        filename:   Original filename (used for extension detection)
+        filename:   Original filename (used for extension + output naming)
 
     Returns:
         (lc_docs, full_text, page_count)
-        - lc_docs:    list of LangChain Document objects (chunked)
+        - lc_docs:    list of _ChunkDoc objects (same interface as Docling path)
         - full_text:  full markdown text of the document
         - page_count: number of pages detected
     """
-    ext = Path(filename).suffix.lower()
-    if not ext:
-        ext = ".pdf"
+    t0 = time.time()
+    print(f"📄 MinerU: parsing {filename} ...")
 
-    # Write bytes to a temp file (Docling needs a file path)
-    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-        tmp.write(file_bytes)
-        tmp_path = tmp.name
-
-    full_text = ""
-    page_count = 0
-    converter = None
-
+    tmp_dir = tempfile.mkdtemp(prefix="mineru_")
     try:
-        t0 = time.time()
-        print(f"📄 Docling: parsing {filename} ...")
+        # ── 1. Run MinerU ──────────────────────────────────────────────
+        full_text, content_list = _run_mineru(file_bytes, filename, tmp_dir)
 
-        # ── Step 1: Convert document ──────────────────────────────────────
-        if ext == ".pdf":
-            # — Tier 1: Lean parse (no OCR, no table structure) ————————————
-            print("⚡ Tier 1 (lean): parsing PDF without OCR or table structure")
-            converter = DocumentConverter(format_options=_lean_format_options)
-            result = converter.convert(tmp_path)
-            full_text = result.document.export_to_markdown()
-            page_count = _get_page_count(result)
-            t_lean = time.time() - t0
-            print(f"   Lean parse done in {t_lean:.1f}s — {page_count} pages, {len(full_text)} chars")
+        t_parse = time.time() - t0
+        print(f"   MinerU parse done in {t_parse:.1f}s — "
+              f"{len(full_text)} chars, {len(content_list)} content blocks")
 
-            if _should_enable_ocr(ext=ext, full_text=full_text, page_count=page_count):
-                # — Tier 3: OCR path (scanned PDF) ————————————————————————
-                print("🧾 Low text density detected; switching to Tier 3 (OCR)")
-                result, converter = _convert_with_ocr(tmp_path)
-                full_text = result.document.export_to_markdown()
-                page_count = _get_page_count(result)
-            elif _needs_table_enrichment(result.document):
-                # — Tier 2: Enriched parse (table-heavy PDF) ———————————————
-                t1 = time.time()
-                table_count = sum(
-                    1 for item in getattr(result.document, "body", [])
-                    if "table" in str(getattr(item, "label", "")).lower()
-                )
-                print(f"📊 Detected {table_count} tables; switching to Tier 2 (FAST table structure)")
-                converter = DocumentConverter(format_options=_enriched_format_options)
-                result = converter.convert(tmp_path)
-                full_text = result.document.export_to_markdown()
-                page_count = _get_page_count(result)
-                t_enrich = time.time() - t1
-                print(f"   Enriched parse done in {t_enrich:.1f}s")
-            else:
-                print("✅ Text-rich PDF with few/no tables; lean parse is sufficient")
+        # ── 2. Extract page count ──────────────────────────────────────
+        page_count = _count_pages_from_content_list(content_list)
 
+        # ── 3. Chunk ───────────────────────────────────────────────────
+        if content_list:
+            lc_docs = _build_chunks_from_content_list(content_list)
         else:
-            # Non-PDF formats always go through OCR path
-            result, converter = _convert_with_ocr(tmp_path)
-            full_text = result.document.export_to_markdown()
-            page_count = _get_page_count(result)
+            print("⚠️  MinerU: falling back to raw markdown chunker")
+            lc_docs = _chunk_markdown_fallback(full_text)
+
+        if not lc_docs:
+            raise RuntimeError("No chunks produced from MinerU output")
 
         t_total = time.time() - t0
-        print(f"✅ Docling: parsed {page_count} pages, {len(full_text)} chars in {t_total:.1f}s")
+        print(f"✅ MinerU: {page_count} pages | {len(lc_docs)} chunks | "
+              f"{len(full_text)} chars | total {t_total:.1f}s")
 
-        # ── Step 2: Chunk directly from conversion result (single pass) ────
-        lc_docs = _build_lc_docs_from_document(result.document)
-        if not lc_docs:
-            raise RuntimeError("No chunks produced from direct Docling chunking")
-        print(f"✂️  Docling: produced {len(lc_docs)} chunks")
-        return lc_docs, full_text, page_count
-    except Exception as chunk_err:
-        # Compatibility fallback: keep old path as a safety net.
-        print(f"⚠️  Direct chunking path failed ({chunk_err}); falling back to DoclingLoader")
-        if converter is None:
-            converter = DocumentConverter(format_options=_ocr_format_options)
-        loader = DoclingLoader(
-            file_path=tmp_path,
-            export_type=ExportType.DOC_CHUNKS,
-            converter=converter,
-            chunker=HybridChunker(
-                tokenizer=AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL, trust_remote_code=True),
-                max_tokens=600,
-                merge_peers=True,
-            ),
-        )
-        lc_docs = loader.load()
-        if not full_text:
-            full_text = "\n\n".join((doc.page_content or "") for doc in lc_docs).strip()
-        if page_count <= 0:
-            page_count = 1
-        print(f"✂️  Docling: produced {len(lc_docs)} chunks")
         return lc_docs, full_text, page_count
 
     finally:
-        os.unlink(tmp_path)
-
-
-def _estimate_page_count(document) -> int:
-    """Estimate page count from document item provenance data."""
-    max_page = 0
-    try:
-        for item in getattr(document, "body", []):
-            for prov in getattr(item, "prov", []):
-                if hasattr(prov, "page_no"):
-                    max_page = max(max_page, prov.page_no)
-    except Exception:
-        pass
-    return max_page if max_page > 0 else 1
+        # Always clean up MinerU temp output
+        shutil.rmtree(tmp_dir, ignore_errors=True)

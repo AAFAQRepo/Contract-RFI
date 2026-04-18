@@ -10,11 +10,23 @@ from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from pydantic import BaseModel
 
 from core.database import get_db
 from core.auth import get_current_user
 from models.models import Document, Chunk, User
-from services.storage import upload_document, build_object_name
+from services.storage import (
+    upload_document, 
+    build_object_name, 
+    get_presigned_upload_url
+)
+
+class UploadUrlRequest(BaseModel):
+    filename: str
+    content_type: str
+
+class ProcessRequest(BaseModel):
+    file_size_bytes: int
 
 router = APIRouter()
 
@@ -90,6 +102,92 @@ async def upload_document_endpoint(
         "status": "processing",
         "size_mb": round(size_mb, 2),
         "message": "Document uploaded. Processing started in background.",
+    }
+
+
+@router.post("/upload-url")
+async def get_upload_url(
+    request: UploadUrlRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Step 1: Get a presigned MinIO URL for direct browser upload.
+    Creates a 'initializing' record in DB.
+    """
+    # Validate extension
+    ext = Path(request.filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Allowed: PDF, DOCX",
+        )
+
+    user_id = str(current_user.id)
+    doc_id = str(uuid.uuid4())
+    object_name = build_object_name(user_id, doc_id, request.filename)
+    
+    upload_url = get_presigned_upload_url(object_name)
+
+    # Create DB record with status 'initializing'
+    doc = Document(
+        id=doc_id,
+        user_id=user_id,
+        filename=request.filename,
+        file_path=object_name,
+        file_type=ext.lstrip("."),
+        status="uploading",  # Match models.py default/existing statuses
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(doc)
+    await db.commit()
+
+    return {
+        "document_id": doc_id,
+        "upload_url": upload_url,
+        "object_name": object_name,
+    }
+
+
+@router.post("/{doc_id}/process")
+async def process_document_start(
+    doc_id: str,
+    request: ProcessRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Step 2: Signal that the browser has finished uploading to MinIO.
+    Starts the Celery processing task.
+    """
+    doc = await db.get(Document, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    if str(doc.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    # Update metadata
+    doc.file_size_bytes = request.file_size_bytes
+    doc.status = "processing"
+    doc.updated_at = datetime.utcnow()
+    
+    await db.commit()
+
+    # Trigger Celery
+    from workers.celery_app import process_document
+    process_document.delay(
+        document_id=str(doc.id),
+        user_id=str(doc.user_id),
+        object_name=doc.file_path,
+        filename=doc.filename,
+    )
+
+    return {
+        "document_id": str(doc.id),
+        "status": "processing",
+        "message": "Processing started.",
     }
 
 

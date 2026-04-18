@@ -25,6 +25,18 @@ def upload_document(file_bytes: bytes, object_name: str, content_type: str = "ap
     return object_name
 
 
+def get_presigned_upload_url(object_name: str, expires_minutes: int = 30) -> str:
+    """
+    Generate a presigned URL for PUT uploading directly from building.
+    """
+    from datetime import timedelta
+    return minio_client.presigned_put_object(
+        bucket_name=settings.MINIO_BUCKET,
+        object_name=object_name,
+        expires=timedelta(minutes=expires_minutes),
+    )
+
+
 def download_document(object_name: str) -> bytes:
     """
     Download a document from MinIO and return its bytes.

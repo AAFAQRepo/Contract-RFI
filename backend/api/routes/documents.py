@@ -14,12 +14,92 @@ from sqlalchemy import select
 from core.database import get_db
 from core.auth import get_current_user
 from models.models import Document, Chunk, User
-from services.storage import upload_document, build_object_name
+from services.storage import upload_document, build_object_name, get_presigned_upload_url
 
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc"}
-MAX_FILE_SIZE_MB = 100
+MAX_FILE_SIZE_MB = 150 # Increased for textbooks
+
+
+@router.post("/initiate-upload")
+async def initiate_upload(
+    filename: str,
+    content_type: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Step 1 of Direct Upload: Generate a presigned URL for the client to PUT to MinIO.
+    """
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type '{ext}'")
+
+    user_id = str(current_user.id)
+    document_id = str(uuid.uuid4())
+    object_name = build_object_name(user_id, document_id, filename)
+
+    # Generate the URL
+    try:
+        upload_url = get_presigned_upload_url(object_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate upload URL: {str(e)}")
+
+    # Create placeholder record in DB
+    doc = Document(
+        id=document_id,
+        user_id=user_id,
+        filename=filename,
+        file_path=object_name,
+        file_type=ext.lstrip("."),
+        status="uploading",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(doc)
+    await db.commit()
+
+    return {
+        "document_id": document_id,
+        "upload_url": upload_url,
+        "object_name": object_name,
+    }
+
+
+@router.post("/finalize-upload/{doc_id}")
+async def finalize_upload(
+    doc_id: str,
+    file_size: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Step 3 of Direct Upload: Client notifies us that the PUT to MinIO is finished.
+    Sets status to 'processing' and triggers Celery.
+    """
+    doc = await db.get(Document, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if str(doc.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    doc.status = "processing"
+    doc.file_size_bytes = file_size
+    doc.updated_at = datetime.utcnow()
+    await db.commit()
+
+    # Enqueue Celery task
+    from workers.celery_app import process_document
+    process_document.delay(
+        document_id=doc_id,
+        user_id=str(current_user.id),
+        object_name=doc.file_path,
+        filename=doc.filename,
+    )
+
+    return {"status": "processing", "document_id": doc_id}
 
 
 @router.post("/upload")

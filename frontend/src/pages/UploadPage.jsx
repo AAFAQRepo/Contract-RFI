@@ -116,27 +116,61 @@ function UploadPage() {
     if (!file) return
     setError(null)
     setUploading(true)
-
-    const formData = new FormData()
-    formData.append('file', file)
+    
+    // 0. Use a temporary ID for the UI during upload
+    const tempId = 'temp-' + Date.now()
+    const initialDoc = {
+      id: tempId,
+      filename: file.name,
+      status: 'uploading',
+      size_mb: (file.size / (1024 * 1024)).toFixed(2),
+      progress_percent: 0
+    }
+    setDocuments(prev => [initialDoc, ...prev])
 
     try {
-      const res = await api.post('/documents/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      // 1. Step 1: Initiate upload and get presigned URL
+      const initiateRes = await api.post('/documents/initiate-upload', null, {
+        params: { filename: file.name, content_type: file.type }
       })
-      const newDoc = {
-        id: res.data.document_id,
-        filename: res.data.filename || file.name,
-        status: 'processing',
-        size_mb: res.data.size_mb,
-        language: null,
-        page_count: null,
-      }
-      setDocuments(prev => [newDoc, ...prev])
-      startPolling(newDoc.id)
+      const { document_id, upload_url } = initiateRes.data
+
+      // 2. Step 2: PUT file directly to MinIO with progress tracking
+      // We use the full axios instance to ensure CORS headers etc are handled
+      await api.put(upload_url, file, {
+        headers: { 'Content-Type': file.type },
+        transformRequest: [(data) => data], // Don't let axios serialize the blob
+        onUploadProgress: (progressEvent) => {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          setDocuments(prev => 
+            prev.map(d => d.id === tempId ? { ...d, progress_percent: percent } : d)
+          )
+        }
+      })
+
+      // 3. Step 3: Finalize upload
+      await api.post(`/documents/finalize-upload/${document_id}`, null, {
+        params: { file_size: file.size }
+      })
+
+      // Update the doc in list with real ID and change status
+      setDocuments(prev => 
+        prev.map(d => d.id === tempId ? { 
+          ...d, 
+          id: document_id, 
+          status: 'processing',
+          progress_percent: 10 
+        } : d)
+      )
+      
+      startPolling(document_id)
+
     } catch (e) {
-      const msg = e.response?.data?.detail || 'Upload failed. Please try again.'
+      console.error('Direct upload failed', e)
+      const msg = e.response?.data?.detail || 'Direct upload failed. Please try again.'
       setError(msg)
+      // Remove the failed doc from list
+      setDocuments(prev => prev.filter(d => d.id !== tempId))
     } finally {
       setUploading(false)
     }

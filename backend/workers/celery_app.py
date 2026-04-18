@@ -66,98 +66,135 @@ def test_task(message: str) -> dict:
     return {"status": "ok", "message": f"Celery received: {message}"}
 
 
-@celery_app.task(name="workers.process_document", bind=True, max_retries=3)
-def process_document(self, document_id: str, user_id: str, object_name: str, filename: str):
+@celery_app.task(name="workers.parse_document_task", bind=True, max_retries=3)
+def parse_document_task(self, document_id: str, user_id: str, object_name: str, filename: str):
     """
-    Full async ingestion pipeline for a single document.
-    Uses MinerU pipeline backend (auto parse_method: txt for digital PDFs,
-    OCR for scanned docs) + rule-based chunker over content_list.json.
+    Stage 1: High-latency GPU extraction with MinerU.
+    Saves raw results to storage as artifacts.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from datetime import datetime
+    import json
+    from models.models import Document
+    from services.storage import download_document, upload_artifact
+    from services.extraction import parse_only
+
+    engine = create_engine(settings.DATABASE_URL_SYNC)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    def _update_status(status: str, step: str = None, progress: int = None, error: str = None):
+        doc = session.get(Document, document_id)
+        if doc:
+            doc.status = status
+            if step: doc.processing_step = step
+            if progress is not None: doc.progress_percent = progress
+            if error: doc.error_message = error
+            doc.updated_at = datetime.utcnow()
+            session.commit()
+
+    try:
+        print(f"⏳ Stage 1: Parsing document {document_id}")
+        _update_status("processing", step="Parsing structure", progress=10)
+
+        # 1. Download from MinIO
+        file_bytes = download_document(object_name)
+        _update_status("processing", step="Extracting text", progress=20)
+
+        # 2. Extract with MinerU
+        full_text, content_list = parse_only(file_bytes, filename)
+        _update_status("processing", step="Saving artifacts", progress=50)
+
+        # 3. Save artifacts back to MinIO for Stage 2
+        prefix = f"{user_id}/{document_id}/artifacts"
+        upload_artifact(f"{prefix}/content_list.json", json.dumps(content_list).encode("utf-8"))
+        upload_artifact(f"{prefix}/full.md", full_text.encode("utf-8"), content_type="text/markdown")
+
+        # 4. Trigger Stage 2
+        print(f"✅ Stage 1 complete for {document_id}. Triggering Stage 2...")
+        finalize_ingestion_task.delay(document_id, user_id, filename)
+        
+    except Exception as exc:
+        print(f"❌ Stage 1 failed for {document_id}: {exc}")
+        session.rollback()
+        _update_status("error", error=str(exc))
+        raise self.retry(exc=exc, countdown=5)
+    finally:
+        session.close()
+
+
+@celery_app.task(name="workers.finalize_ingestion_task", bind=True, max_retries=3)
+def finalize_ingestion_task(self, document_id: str, user_id: str, filename: str):
+    """
+    Stage 2: Chunking, Language Detection, and Embedding. 
+    Uses the cached artifacts from Stage 1.
     """
     import uuid as _uuid
+    import json
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from datetime import datetime
     from models.models import Document, Chunk
     from services.storage import download_document
-    from services.extraction import extract_and_chunk
+    from services.extraction import chunk_from_results
     from services.language import detect_language
     from services.embedding import store_parsed_chunks_in_qdrant
 
-    # Sync engine for Celery (not async)
     engine = create_engine(settings.DATABASE_URL_SYNC)
     Session = sessionmaker(bind=engine)
+    session = Session()
 
-    def _update_status(session, status: str, step: str = None, progress: int = None, error: str = None):
+    def _update_status(status: str, step: str = None, progress: int = None, error: str = None):
         doc = session.get(Document, document_id)
         if doc:
             doc.status = status
+            if step: doc.processing_step = step
+            if progress is not None: doc.progress_percent = progress
+            if error: doc.error_message = error
             doc.updated_at = datetime.utcnow()
-            if step:
-                doc.processing_step = step
-            if progress is not None:
-                doc.progress_percent = progress
-            if error:
-                doc.error_message = error
             session.commit()
 
-    session = Session()
     try:
-        # Pre-check existence (handles the race condition on server)
-        doc = session.get(Document, document_id)
-        if not doc:
-            print(f"⚠️  Document {document_id} not found in DB; retrying in 2s...")
-            raise self.retry(countdown=2)
+        print(f"🔢 Stage 2: Ingesting document {document_id}")
+        _update_status("processing", step="Analyzing structure", progress=60)
 
-        print(f"⏳ Processing document {document_id}")
-        _update_status(session, "processing", step="Downloading", progress=10)
+        # 1. Download artifacts
+        prefix = f"{user_id}/{document_id}/artifacts"
+        cl_bytes = download_document(f"{prefix}/content_list.json")
+        md_bytes = download_document(f"{prefix}/full.md")
+        
+        content_list = json.loads(cl_bytes.decode("utf-8"))
+        full_text = md_bytes.decode("utf-8")
 
-        # 1. Download from MinIO
-        print(f"⬇️  Downloading {object_name}")
-        file_bytes = download_document(object_name)
-        _update_status(session, "processing", step="Extracting text", progress=30)
+        # 2. Structure-aware Chunking
+        _update_status("processing", step="Chunking", progress=70)
+        lc_docs, page_count = chunk_from_results(content_list, full_text)
 
-        # 2. Extract + chunk with MinerU (single call)
-        print(f"📄 Extracting and chunking {filename} (MinerU)")
-        lc_docs, full_text, page_count = extract_and_chunk(file_bytes, filename)
-        _update_status(session, "processing", step="Detecting language", progress=50)
-
-        # 3. Detect language
+        # 3. Language Detect & Meta Update
         language = detect_language(full_text)
-        print(f"🌐 Detected language: {language}")
-
-        # 4. Update document metadata
         doc = session.get(Document, document_id)
         if doc:
             doc.language = language
             doc.page_count = page_count
-            doc.updated_at = datetime.utcnow()
             session.commit()
-        
-        _update_status(session, "processing", step="Embedding chunks", progress=70)
 
-        # 5. Embed + store chunks in Qdrant
-        print(f"🔢 Embedding {len(lc_docs)} chunks...")
+        # 4. Embedding & Qdrant
+        _update_status("processing", step="Embedding", progress=85)
         point_ids = store_parsed_chunks_in_qdrant(lc_docs, document_id, user_id, language)
-        _update_status(session, "processing", step="Saving to database", progress=90)
 
-        # 6. Store chunks in PostgreSQL for reference
-        print(f"💾 Storing {len(lc_docs)} chunks in database...")
+        # 5. Save chunks to Postgres
+        _update_status("processing", step="Finalizing", progress=95)
         db_chunks = []
-
         for lc_doc, point_id in zip(lc_docs, point_ids):
             meta = lc_doc.metadata or {}
-            dl_meta = meta.get("dl_meta", {})
-            headings = dl_meta.get("headings", [])
+            headings = meta.get("dl_meta", {}).get("headings", [])
             section = headings[0] if headings else ""
-
-            # Extract page number
+            
+            # Simplified page extraction from the new meta structure
             page = 0
-            doc_items = dl_meta.get("doc_items", [])
-            if doc_items:
-                for item in doc_items:
-                    for prov in item.get("prov", []):
-                        if prov.get("page_no", 0) > page:
-                            page = prov["page_no"]
+            prov = meta.get("dl_meta", {}).get("doc_items", [{}])[0].get("prov", [{}])[0]
+            page = prov.get("page_no", 0)
 
             db_chunks.append(Chunk(
                 id=str(_uuid.uuid4()),
@@ -166,35 +203,20 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
                 text=lc_doc.page_content,
                 context_summary=f"[Page {page}] {section}".strip() if page else section,
                 section=section,
-                clause_type=None,
                 page=page,
                 language=language,
                 token_count=len(lc_doc.page_content.split()),
                 qdrant_point_id=point_id,
             ))
-
+        
         session.add_all(db_chunks)
-
-        # 7. Mark as ready
-        _update_status(session, "ready", step="Completed", progress=100)
-        session.commit()
-
-        print(f"✅ Document {document_id} processed successfully")
-        return {
-            "document_id": document_id,
-            "status": "ready",
-            "chunks": len(lc_docs),
-            "language": language,
-            "pages": page_count,
-        }
+        _update_status("ready", step="Completed", progress=100)
+        print(f"✅ Pipeline complete for {document_id}")
 
     except Exception as exc:
-        print(f"❌ Processing failed for {document_id}: {exc}")
-        session.rollback()  # reset transaction after DB error
-        _update_status(session, "error", str(exc))
-        session.commit()
-        # Retry with exponential backoff
-        raise self.retry(exc=exc, countdown=2 ** self.request.retries)
-
+        print(f"❌ Stage 2 failed for {document_id}: {exc}")
+        session.rollback()
+        _update_status("error", error=str(exc))
+        raise self.retry(exc=exc, countdown=5)
     finally:
         session.close()

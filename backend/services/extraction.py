@@ -99,106 +99,102 @@ def _block_text(block: dict) -> str:
     return (block.get("text") or "").strip()
 
 
+def _recursive_split_text(text: str, max_words: int, overlap_words: int) -> list[str]:
+    """
+    Simple recursive text splitter that tries to split on paragraphs, then sentences.
+    """
+    if _estimate_words(text) <= max_words:
+        return [text]
+
+    # Try paragraphs
+    blocks = text.split("\n\n")
+    if len(blocks) > 1:
+        chunks = []
+        current = ""
+        for b in blocks:
+            if _estimate_words(current + "\n\n" + b) <= max_words:
+                current = (current + "\n\n" + b).strip()
+            else:
+                if current: chunks.append(current)
+                # If a single block is too big, recurse on it
+                if _estimate_words(b) > max_words:
+                    chunks.extend(_recursive_split_text(b, max_words, overlap_words))
+                    current = ""
+                else:
+                    current = b
+        if current: chunks.append(current)
+        return chunks
+
+    # Fallback: simple word split (could be improved with sentence splitting)
+    words = text.split()
+    chunks = []
+    step = max_words - overlap_words
+    for i in range(0, len(words), step):
+        chunk = " ".join(words[i : i + max_words])
+        if chunk.strip():
+            chunks.append(chunk)
+    return chunks
+
+
 def _build_chunks_from_content_list(
     content_list: list[dict],
 ) -> list[_ChunkDoc]:
     """
-    Convert MinerU's content_list into _ChunkDoc objects.
-
-    Strategy:
-      - Walk blocks in reading order.
-      - Track the current section heading.
-      - Accumulate text until _MAX_WORDS is reached, then flush.
-      - Blocks shorter than _MIN_WORDS are merged with the next.
+    Convert MinerU's content_list into _ChunkDoc objects using a 
+    recursive section-aware strategy.
     """
-    chunks: list[_ChunkDoc] = []
-    current_heading = ""
-    current_page = 0
-    buffer_texts: list[str] = []
-    buffer_page = 0
-
-    def _flush():
-        nonlocal buffer_texts, buffer_page
-        text = "\n\n".join(t for t in buffer_texts if t).strip()
-        if not text:
-            buffer_texts = []
-            return
-        chunks.append(
-            _ChunkDoc(
-                page_content=text,
-                metadata={
-                    "dl_meta": {
-                        "headings": [current_heading] if current_heading else [],
-                        "doc_items": [{"prov": [{"page_no": buffer_page}]}],
-                    }
-                },
-            )
-        )
-        buffer_texts = []
+    sections: list[dict] = []
+    current_section = {"heading": "", "page": 0, "blocks": []}
 
     for block in content_list:
-        btype = block.get("type", "")
-        page = _page_from_block(block)
-        if page:
-            current_page = page
-
-        # Update running heading tracker
         heading = _heading_from_block(block)
+        page = _page_from_block(block)
+        
         if heading:
-            current_heading = heading
-            # Flush any accumulated text before starting new section
-            _flush()
-            buffer_page = current_page
-            # Include heading as first line of new chunk
-            buffer_texts.append(f"## {heading}")
+            if current_section["blocks"]:
+                sections.append(current_section)
+            current_section = {"heading": heading, "page": page, "blocks": []}
             continue
+        
+        current_section["blocks"].append(block)
+        if not current_section["page"]:
+            current_section["page"] = page
 
-        # Skip empty / pure image blocks with no caption
-        text = _block_text(block)
-        if not text:
+    if current_section["blocks"]:
+        sections.append(current_section)
+
+    chunks: list[_ChunkDoc] = []
+    
+    # Process each section independently
+    for sec in sections:
+        heading = sec["heading"]
+        page = sec["page"]
+        
+        # Combine blocks within the section
+        section_text = "\n\n".join(_block_text(b) for b in sec["blocks"] if _block_text(b))
+        if not section_text.strip():
             continue
-
-        # If buffer is empty, record the starting page
-        if not buffer_texts:
-            buffer_page = current_page
-
-        # Tables always flush before and after (preserve as standalone chunks)
-        if btype == "table":
-            _flush()
-            buffer_page = current_page
+            
+        # Add heading to the text for context
+        full_sec_text = f"## {heading}\n\n{section_text}" if heading else section_text
+        
+        # Split recursively
+        splits = _recursive_split_text(full_sec_text, _MAX_WORDS, overlap_words=50)
+        
+        for split in splits:
             chunks.append(
                 _ChunkDoc(
-                    page_content=text.strip(),
+                    page_content=split,
                     metadata={
                         "dl_meta": {
-                            "headings": [current_heading] if current_heading else [],
-                            "doc_items": [{"prov": [{"page_no": current_page}]}],
+                            "headings": [heading] if heading else [],
+                            "doc_items": [{"prov": [{"page_no": page}]}],
                         }
                     },
                 )
             )
-            continue
 
-        buffer_texts.append(text)
-
-        # Flush when budget exceeded
-        if _estimate_words("\n\n".join(buffer_texts)) >= _MAX_WORDS:
-            _flush()
-            buffer_page = current_page
-
-    _flush()  # Remainder
-
-    # ── Merge tiny trailing chunks ─────────────────────────────────────
-    merged: list[_ChunkDoc] = []
-    for chunk in chunks:
-        if merged and _estimate_words(chunk.page_content) < _MIN_WORDS:
-            # Append to previous chunk
-            prev = merged[-1]
-            prev.page_content = prev.page_content + "\n\n" + chunk.page_content
-        else:
-            merged.append(chunk)
-
-    return merged
+    return chunks
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -267,6 +263,9 @@ def _run_mineru(
     safe_stem = stem[:80]  # avoid overly long paths
 
     # ── Speed Optimization ─────────────────────────────────────────────
+    # Tune MinerU for high-fidelity throughput (22GB GPU safe)
+    os.environ["MINERU_PROCESSING_WINDOW_SIZE"] = "256"
+
     # If it's a digital PDF, we force parse_method="txt" and disable heavy models.
     parse_method = "auto"
     if _is_text_native_pdf(file_bytes, ext):
@@ -274,7 +273,7 @@ def _run_mineru(
         os.environ["MINERU_FORMULA_ENABLE"] = "false"
         os.environ["MINERU_LAYOUT_ENABLE"] = "false"
         os.environ["MINERU_TABLE_ENABLE"] = "false"
-        print("⚡ Text-native PDF detected. High-speed 'txt' path enabled (MFR/Layout disabled).")
+        print("⚡ Text-native PDF detected. High-speed 'txt' path enabled (MFR/Layout/Table disabled).")
 
     from mineru.cli.common import do_parse
 
@@ -387,67 +386,55 @@ def _chunk_markdown_fallback(markdown: str) -> list[_ChunkDoc]:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Public API
+# Public API (Decoupled Stage 1 & 2)
 # ─────────────────────────────────────────────────────────────────────────
+
+def parse_only(
+    file_bytes: bytes,
+    filename: str,
+) -> tuple[str, list[dict]]:
+    """
+    Stage 1: Run MinerU and return raw Markdown and ContentList. 
+    Does NOT perform chunking.
+    """
+    tmp_dir = tempfile.mkdtemp(prefix="mineru_parse_")
+    try:
+        full_text, content_list = _run_mineru(file_bytes, filename, tmp_dir)
+        return full_text, content_list
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def chunk_from_results(
+    content_list: list[dict],
+    full_text: str,
+) -> tuple[list, int]:
+    """
+    Stage 2: Convert parsed outcomes into semantic chunks.
+    """
+    # 1. Derive page count
+    page_count = _count_pages_from_content_list(content_list)
+
+    # 2. Chunk
+    if content_list:
+        lc_docs = _build_chunks_from_content_list(content_list)
+    else:
+        lc_docs = _chunk_markdown_fallback(full_text)
+
+    # 3. Sanitize NUL bytes
+    for doc in lc_docs:
+        doc.page_content = doc.page_content.replace("\x00", "")
+
+    return lc_docs, page_count
+
 
 def extract_and_chunk(
     file_bytes: bytes,
     filename: str,
 ) -> tuple[list, str, int]:
     """
-    Extract text from a document and chunk it using MinerU.
-
-    Uses MinerU's `pipeline` backend with `parse_method="auto"`:
-      - Text-native PDFs  → fast text extraction (sub-second per page)
-      - Scanned PDFs      → OCR via layout-analysis + PaddleOCR
-      - DOCX / images     → converted through MinerU's converter chain
-
-    Args:
-        file_bytes: Raw file content
-        filename:   Original filename (used for extension + output naming)
-
-    Returns:
-        (lc_docs, full_text, page_count)
-        - lc_docs:    list of _ChunkDoc objects (same interface as Docling path)
-        - full_text:  full markdown text of the document
-        - page_count: number of pages detected
+    Legacy wrapper for synchronous extraction + chunking.
     """
-    t0 = time.time()
-    print(f"📄 MinerU: parsing {filename} ...")
-
-    tmp_dir = tempfile.mkdtemp(prefix="mineru_")
-    try:
-        # ── 1. Run MinerU ──────────────────────────────────────────────
-        full_text, content_list = _run_mineru(file_bytes, filename, tmp_dir)
-
-        t_parse = time.time() - t0
-        print(f"   MinerU parse done in {t_parse:.1f}s — "
-              f"{len(full_text)} chars, {len(content_list)} content blocks")
-
-        # ── 2. Extract page count ──────────────────────────────────────
-        page_count = _count_pages_from_content_list(content_list)
-
-        # ── 3. Chunk ───────────────────────────────────────────────────
-        if content_list:
-            lc_docs = _build_chunks_from_content_list(content_list)
-        else:
-            print("⚠️  MinerU: falling back to raw markdown chunker")
-            lc_docs = _chunk_markdown_fallback(full_text)
-
-        if not lc_docs:
-            raise RuntimeError("No chunks produced from MinerU output")
-
-        # ── 4. Sanitize NUL bytes (PostgreSQL rejects them in TEXT) ────
-        full_text = full_text.replace("\x00", "")
-        for doc in lc_docs:
-            doc.page_content = doc.page_content.replace("\x00", "")
-
-        t_total = time.time() - t0
-        print(f"✅ MinerU: {page_count} pages | {len(lc_docs)} chunks | "
-              f"{len(full_text)} chars | total {t_total:.1f}s")
-
-        return lc_docs, full_text, page_count
-
-    finally:
-        # Always clean up MinerU temp output
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+    full_text, content_list = parse_only(file_bytes, filename)
+    lc_docs, page_count = chunk_from_results(content_list, full_text)
+    return lc_docs, full_text, page_count

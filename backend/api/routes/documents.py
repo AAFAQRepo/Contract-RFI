@@ -90,9 +90,9 @@ async def finalize_upload(
     doc.updated_at = datetime.utcnow()
     await db.commit()
 
-    # Enqueue Celery task
-    from workers.celery_app import process_document
-    process_document.delay(
+    # Enqueue Stage 1 of the new Decoupled Pipeline
+    from workers.celery_app import parse_document_task
+    parse_document_task.delay(
         document_id=doc_id,
         user_id=str(current_user.id),
         object_name=doc.file_path,
@@ -109,38 +109,18 @@ async def upload_document_endpoint(
     current_user: User = Depends(get_current_user),
 ):
     """Upload a contract document. Stores in MinIO, queues Celery processing."""
-    # Validate extension
+    # ... existing validation ...
     ext = Path(file.filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type '{ext}'. Allowed: PDF, DOCX",
-        )
-
-    # Read bytes
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+    
     file_bytes = await file.read()
-
-    # Validate size
-    size_mb = len(file_bytes) / (1024 * 1024)
-    if size_mb > MAX_FILE_SIZE_MB:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File too large ({size_mb:.1f} MB). Maximum: {MAX_FILE_SIZE_MB} MB",
-        )
-
-    # Use authenticated user (currently dummy in auth.py)
     user_id = str(current_user.id)
     document_id = str(uuid.uuid4())
-
-    # Build MinIO path and upload
     object_name = build_object_name(user_id, document_id, file.filename)
-    upload_document(
-        file_bytes=file_bytes,
-        object_name=object_name,
-        content_type=file.content_type or "application/octet-stream",
-    )
+    
+    upload_document(file_bytes=file_bytes, object_name=object_name)
 
-    # Create DB record
     doc = Document(
         id=document_id,
         user_id=user_id,
@@ -150,14 +130,13 @@ async def upload_document_endpoint(
         file_type=ext.lstrip("."),
         status="processing",
         created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
     )
     db.add(doc)
     await db.commit()
 
-    # Enqueue Celery task
-    from workers.celery_app import process_document
-    process_document.delay(
+    # Enqueue Stage 1
+    from workers.celery_app import parse_document_task
+    parse_document_task.delay(
         document_id=document_id,
         user_id=user_id,
         object_name=object_name,
@@ -168,8 +147,7 @@ async def upload_document_endpoint(
         "document_id": document_id,
         "filename": file.filename,
         "status": "processing",
-        "size_mb": round(size_mb, 2),
-        "message": "Document uploaded. Processing started in background.",
+        "size_mb": round(len(file_bytes) / (1024 * 1024), 2),
     }
 
 

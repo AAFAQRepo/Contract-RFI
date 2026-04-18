@@ -60,3 +60,17 @@ def delete_document(object_name: str) -> None:
 def build_object_name(user_id: str, document_id: str, filename: str) -> str:
     """Build a consistent MinIO object path."""
     return f"{user_id}/{document_id}/{filename}"
+
+
+def upload_artifact(object_name: str, data: bytes, content_type: str = "application/json") -> str:
+    """
+    Upload a processing artifact (e.g. content_list.json) to MinIO.
+    """
+    minio_client.put_object(
+        bucket_name=settings.MINIO_BUCKET,
+        object_name=object_name,
+        data=io.BytesIO(data),
+        length=len(data),
+        content_type=content_type,
+    )
+    return object_name

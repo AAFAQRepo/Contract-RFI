@@ -299,41 +299,45 @@ def _run_mineru(
         from mineru.backend.pipeline.batch_analyze import BatchAnalyze
         
         # ── Sub-100s Boost: Deep Monkey-Patch ─────────────────────────────
-        # For digital PDFs, we force the Batch Controller to skip OCR detection stages
+        # For digital PDFs, we force the Batch Controller to skip OCR stages
         # even if those flags are ignored by the high-level do_parse API.
         original_dpi = pdf_tools.DEFAULT_PDF_IMAGE_DPI
-        
         pdf_tools.DEFAULT_PDF_IMAGE_DPI = 72
         
-        # 2. Suppress Vision-OCR detection (Stage 1 boost)
+        # 2. Hard-Kill MinerU OCR execution loops (Stage 1 definitive boost)
         try:
-            from mineru.backend.pipeline.batch_analyze import BatchAnalyze
-            BatchAnalyze.__original_init__ = BatchAnalyze.__init__
-            def patched_analyze_init(self, *args, **kwargs):
-                self.__original_init__(*args, **kwargs)
-                logger.warning("🚫 Deep-Patch: Suppressed Vision-OCR detection.")
+            # We patch __call__ to wrap the existing one and strip out OCR tasks
+            original_call = BatchAnalyze.__call__
+            
+            def patched_analyze_call(self, images_with_extra_info):
+                # If we are in 'txt' mode (via our DPI signal), we force OCR off for all items
+                fast_images = []
+                for img, ocr_en, lang in images_with_extra_info:
+                    fast_images.append((img, False, lang))
+                
+                # Force internal detection loops to False
                 self.text_ocr_det_batch_enabled = False
-            BatchAnalyze.__init__ = patched_analyze_init
+                self.enable_ocr_det_batch = False
+                self.table_enable = False 
+                
+                logger.warning("🚫 Deep-Patch: Hard-Killed Vision-OCR Execution Loops.")
+                return original_call(self, fast_images)
+                
+            BatchAnalyze.__call__ = patched_analyze_call
         except Exception as e:
-            logger.warning(f"⚠️ Could not patch BatchAnalyze: {e}")
+            logger.warning(f"⚠️ Could not Hard-Kill BatchAnalyze: {e}")
 
-        # 3. Suppress Post-Processor OCR (Stage 1 boost)
+        # 3. Suppress Post-Processor OCR and Image/Table Cutting (I/O bypass)
         try:
             import mineru.backend.pipeline.model_json_to_middle_json as mj
-            def patched_apply_post_ocr(pdf_info_list, lang=None):
-                logger.warning("🚫 Deep-Patch: Bypassing Post-Processor OCR.")
-                return
-            mj._apply_post_ocr = patched_apply_post_ocr
-            
-            # 4. Suppress Image/Table Cutting (I/O bypass)
-            def patched_cut_image(span, *args, **kwargs):
-                return span
-            mj.cut_image_and_table = patched_cut_image
+            mj._apply_post_ocr = lambda *a, **k: None
+            mj.cut_image_and_table = lambda span, *a, **k: span
+            logger.warning("🚫 Deep-Patch: Bypassed Post-OCR and I/O Cutting.")
         except Exception as e:
-            logger.warning(f"⚠️ Could not patch ModelJsonToMiddleJson: {e}")
+            logger.warning(f"⚠️ Could not patch MJ helpers: {e}")
 
-        # 5. Extract and cleanup
-        logger.warning("⚡ Sub-100s Boost: Lowering rendering DPI to 72 + Vision-OCR Suppression.")
+        # 4. Extract and cleanup
+        logger.warning("⚡ Sub-100s Boost: Lowering rendering DPI to 72 + OCR Hard-Kill.")
 
         try:
             do_parse(
@@ -356,7 +360,8 @@ def _run_mineru(
         finally:
             # Restore original state
             pdf_tools.DEFAULT_PDF_IMAGE_DPI = original_dpi
-            BatchAnalyze.__init__ = original_init
+            if 'original_call' in locals():
+                BatchAnalyze.__call__ = original_call
 
     # ── Locate output files properly ───────────────────────────────────
     # MinerU 3.0 creates: <output_dir>/<safe_stem>/<parse_method>/...

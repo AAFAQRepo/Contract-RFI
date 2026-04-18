@@ -28,6 +28,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from loguru import logger
 
 from core.config import get_settings
 

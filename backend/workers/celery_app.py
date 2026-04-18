@@ -21,7 +21,7 @@ os.environ["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
 # Add backend directory to sys.path so modules like 'models' can be imported when running Celery
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from celery import Celery
+from celery import Celery, chord, group
 from core.config import get_settings
 
 settings = get_settings()
@@ -67,28 +67,63 @@ def test_task(message: str) -> dict:
     return {"status": "ok", "message": f"Celery received: {message}"}
 
 
-@celery_app.task(name="workers.process_document", bind=True, max_retries=3)
-def process_document(self, document_id: str, user_id: str, object_name: str, filename: str):
+@celery_app.task(name="workers.extract_chunk_task", max_retries=3)
+def extract_chunk_task(chunk_bytes: bytes, filename: str, offset_page_no: int) -> tuple[list[dict], str, int]:
     """
-    Full async ingestion pipeline for a single document.
-    Uses Docling three-tier pipeline (Lean → Enriched → OCR) + HybridChunker.
+    Worker task to extract text from a specific PDF chunk or file.
+    Returns (serialized_lc_docs, full_text, page_count).
+    """
+    from services.extraction import extract_and_chunk
+    lc_docs, full_text, page_count = extract_and_chunk(chunk_bytes, filename, offset_page_no)
+
+    # Serialize for Celery JSON compatibility
+    serialized_docs = [
+        {"page_content": d.page_content, "metadata": d.metadata}
+        for d in lc_docs
+    ]
+    return serialized_docs, full_text, page_count
+
+
+@celery_app.task(name="workers.finalize_document_ingestion")
+def finalize_document_ingestion(results, document_id: str, user_id: str, filename: str):
+    """
+    Reducer task: Merges results from parallel extraction segments,
+    detects language, embeds chunks, and stores everything in DB/Qdrant.
     """
     import uuid as _uuid
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from datetime import datetime
     from models.models import Document, Chunk
-    from services.storage import download_document
-    from services.extraction import extract_and_chunk
     from services.language import detect_language
     from services.embedding import store_docling_chunks_in_qdrant
+    from services.extraction import _ChunkDoc  # For type hinting if needed
 
-    # Sync engine for Celery (not async)
+    # results is a list of [serialized_docs, full_text, page_count]
+    all_lc_docs = []
+    merged_full_text_parts = []
+    total_page_count = 0
+
+    # Sort results by offset (implicitly stored in results order if using chord)
+    # Actually, Celery chord results are in the order of the group.
+    for sc_docs, full_text, page_count in results:
+        # Reconstruct _ChunkDoc objects
+        all_lc_docs.extend([
+            _ChunkDoc(page_content=d["page_content"], metadata=d["metadata"])
+            for d in sc_docs
+        ])
+        if full_text:
+            merged_full_text_parts.append(full_text)
+        total_page_count += page_count
+
+    merged_full_text = "\n\n".join(merged_full_text_parts)
+
     engine = create_engine(settings.DATABASE_URL_SYNC)
     Session = sessionmaker(bind=engine)
+    session = Session()
 
-    def _update_status(session, status: str, step: str = None, progress: int = None, error: str = None):
-        doc = session.get(Document, document_id)
+    def _update_status(sess, status: str, step: str = None, progress: int = None, error: str = None):
+        doc = sess.get(Document, document_id)
         if doc:
             doc.status = status
             doc.updated_at = datetime.utcnow()
@@ -98,59 +133,42 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
                 doc.progress_percent = progress
             if error:
                 doc.error_message = error
-            session.commit()
+            sess.commit()
 
-    session = Session()
     try:
-        # Pre-check existence (handles the race condition on server)
-        doc = session.get(Document, document_id)
-        if not doc:
-            print(f"⚠️  Document {document_id} not found in DB; retrying in 2s...")
-            raise self.retry(countdown=2)
+        print(f"🏁 Merging results for {document_id} ({len(all_lc_docs)} chunks total)")
+        _update_status(session, "processing", step="Merging results", progress=50)
 
-        print(f"⏳ Processing document {document_id}")
-        _update_status(session, "processing", step="Downloading", progress=10)
+        # 1. Detect language
+        language = detect_language(merged_full_text)
+        print(f"🌐 Merged language detection: {language}")
 
-        # 1. Download from MinIO
-        print(f"⬇️  Downloading {object_name}")
-        file_bytes = download_document(object_name)
-        _update_status(session, "processing", step="Extracting text", progress=30)
-
-        # 2. Extract + chunk with Docling (single call!)
-        print(f"📄 Extracting and chunking {filename}")
-        lc_docs, full_text, page_count = extract_and_chunk(file_bytes, filename)
-        _update_status(session, "processing", step="Detecting language", progress=50)
-
-        # 3. Detect language
-        language = detect_language(full_text)
-        print(f"🌐 Detected language: {language}")
-
-        # 4. Update document metadata
+        # 2. Update document metadata
         doc = session.get(Document, document_id)
         if doc:
             doc.language = language
-            doc.page_count = page_count
+            doc.page_count = total_page_count
             doc.updated_at = datetime.utcnow()
             session.commit()
-        
+
         _update_status(session, "processing", step="Embedding chunks", progress=70)
 
-        # 5. Embed + store chunks in Qdrant
-        print(f"🔢 Embedding {len(lc_docs)} chunks...")
-        point_ids = store_docling_chunks_in_qdrant(lc_docs, document_id, user_id, language)
+        # 3. Embed + store chunks in Qdrant
+        print(f"🔢 Embedding {len(all_lc_docs)} merged chunks...")
+        point_ids = store_docling_chunks_in_qdrant(all_lc_docs, document_id, user_id, language)
         _update_status(session, "processing", step="Saving to database", progress=90)
 
-        # 6. Store chunks in PostgreSQL for reference
-        print(f"💾 Storing {len(lc_docs)} chunks in database...")
+        # 4. Store chunks in PostgreSQL
+        print(f"💾 Storing {len(all_lc_docs)} chunks in database...")
         db_chunks = []
 
-        for lc_doc, point_id in zip(lc_docs, point_ids):
+        for lc_doc, point_id in zip(all_lc_docs, point_ids):
             meta = lc_doc.metadata or {}
             dl_meta = meta.get("dl_meta", {})
             headings = dl_meta.get("headings", [])
             section = headings[0] if headings else ""
 
-            # Extract page number
+            # Extract page number (already adjusted by offset in the worker)
             page = 0
             doc_items = dl_meta.get("doc_items", [])
             if doc_items:
@@ -166,7 +184,6 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
                 text=lc_doc.page_content,
                 context_summary=f"[Page {page}] {section}".strip() if page else section,
                 section=section,
-                clause_type=None,
                 page=page,
                 language=language,
                 token_count=len(lc_doc.page_content.split()),
@@ -174,26 +191,98 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
             ))
 
         session.add_all(db_chunks)
-
-        # 7. Mark as ready
         _update_status(session, "ready", step="Completed", progress=100)
         session.commit()
 
-        print(f"✅ Document {document_id} processed successfully")
-        return {
-            "document_id": document_id,
-            "status": "ready",
-            "chunks": len(lc_docs),
-            "language": language,
-            "pages": page_count,
-        }
+        print(f"✅ Parallel processing for {document_id} completed")
 
     except Exception as exc:
-        print(f"❌ Processing failed for {document_id}: {exc}")
-        _update_status(session, "error", str(exc))
+        print(f"❌ Finalization failed for {document_id}: {exc}")
+        _update_status(session, "error", error=str(exc))
         session.commit()
-        # Retry with exponential backoff
-        raise self.retry(exc=exc, countdown=2 ** self.request.retries)
+    finally:
+        session.close()
 
+
+@celery_app.task(name="workers.process_document", bind=True, max_retries=3)
+def process_document(self, document_id: str, user_id: str, object_name: str, filename: str):
+    """
+    Coordinator task for document ingestion.
+    Implementation:
+      1. Download file from MinIO.
+      2. If PDF, split into two segments for parallel processing.
+      3. Dispatch workers via Chord and merge in finalized task.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from datetime import datetime
+    from models.models import Document
+    from services.storage import download_document
+    from services.extraction import split_pdf_in_half
+
+    engine = create_engine(settings.DATABASE_URL_SYNC)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    def _update_status(sess, status: str, step: str = None, progress: int = None, error: str = None):
+        doc = sess.get(Document, document_id)
+        if doc:
+            doc.status = status
+            doc.updated_at = datetime.utcnow()
+            if step:
+                doc.processing_step = step
+            if progress is not None:
+                doc.progress_percent = progress
+            if error:
+                doc.error_message = error
+            sess.commit()
+
+    try:
+        # Pre-check existence
+        doc = session.get(Document, document_id)
+        if not doc:
+            raise self.retry(countdown=2)
+
+        print(f"⏳ Starting parallel ingestion for {document_id}")
+        _update_status(session, "processing", step="Downloading", progress=10)
+
+        # 1. Download
+        file_bytes = download_document(object_name)
+
+        # 2. Coordinate Extraction
+        ext = filename.lower().split('.')[-1]
+        
+        if ext == 'pdf':
+            print("🔀 PDF detected: splitting into two parallel segments")
+            _update_status(session, "processing", step="Splitting PDF", progress=20)
+            segments = split_pdf_in_half(file_bytes)
+        else:
+            # Single segment for non-PDFs
+            segments = [(file_bytes, 0)]
+
+        # 3. Create Chord: Map (Extract) -> Reduce (Finalize)
+        _update_status(session, "processing", step=f"Dispatching {len(segments)} workers", progress=30)
+        
+        callback = finalize_document_ingestion.s(
+            document_id=document_id,
+            user_id=user_id,
+            filename=filename
+        )
+        
+        header = [
+            extract_chunk_task.s(chunk_bytes, filename, offset)
+            for chunk_bytes, offset in segments
+        ]
+        
+        chord(header)(callback)
+        
+        print(f"📡 Coordination complete for {document_id}. Workers dispatched.")
+        return {"status": "dispatched", "parts": len(segments)}
+
+    except Exception as exc:
+        print(f"❌ Coordination failed for {document_id}: {exc}")
+        _update_status(session, "error", error=str(exc))
+        session.commit()
+        raise self.retry(exc=exc, countdown=2 ** self.request.retries)
     finally:
         session.close()

@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import fitz  # PyMuPDF
+
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import (
     PdfPipelineOptions,
@@ -197,7 +199,7 @@ def _serialize_chunk(chunker: HybridChunker, chunk: Any) -> str:
     return str(chunk)
 
 
-def _build_lc_docs_from_document(document: Any) -> list[_ChunkDoc]:
+def _build_lc_docs_from_document(document: Any, offset_page_no: int = 0) -> list[_ChunkDoc]:
     """
     Build LangChain-like docs directly from an already-converted Docling document.
     This avoids a second full conversion pass in DoclingLoader.
@@ -233,6 +235,12 @@ def _build_lc_docs_from_document(document: Any) -> list[_ChunkDoc]:
             for item in raw_doc_items:
                 item_dict = _to_dict_safe(item)
                 if item_dict:
+                    # Adjust page numbers for parallel chunk offsets
+                    prov_list = item_dict.get("prov", [])
+                    if prov_list:
+                        for prov in prov_list:
+                            if "page_no" in prov:
+                                prov["page_no"] += offset_page_no
                     doc_items.append(item_dict)
 
         out.append(
@@ -261,6 +269,7 @@ def _convert_with_ocr(tmp_path: str):
 def extract_and_chunk(
     file_bytes: bytes,
     filename: str,
+    offset_page_no: int = 0,
 ) -> tuple[list, str, int]:
     """
     Extract text from a document and chunk it using Docling's HybridChunker.
@@ -271,8 +280,9 @@ def extract_and_chunk(
       3. If text-sparse  → re-parse with OCR
 
     Args:
-        file_bytes: Raw file content
-        filename:   Original filename (used for extension detection)
+        file_bytes:     Raw file content
+        filename:       Original filename (used for extension detection)
+        offset_page_no: Page number offset for merged parallel segments
 
     Returns:
         (lc_docs, full_text, page_count)
@@ -341,7 +351,7 @@ def extract_and_chunk(
         print(f"✅ Docling: parsed {page_count} pages, {len(full_text)} chars in {t_total:.1f}s")
 
         # ── Step 2: Chunk directly from conversion result (single pass) ────
-        lc_docs = _build_lc_docs_from_document(result.document)
+        lc_docs = _build_lc_docs_from_document(result.document, offset_page_no=offset_page_no)
         if not lc_docs:
             raise RuntimeError("No chunks produced from direct Docling chunking")
         print(f"✂️  Docling: produced {len(lc_docs)} chunks")
@@ -384,3 +394,33 @@ def _estimate_page_count(document) -> int:
     except Exception:
         pass
     return max_page if max_page > 0 else 1
+
+
+def split_pdf_in_half(file_bytes: bytes) -> list[tuple[bytes, int]]:
+    """
+    Split a PDF into two equal parts based on page count.
+    Used for parallel processing across workers.
+
+    Returns:
+        A list of (part_bytes, offset_page_no)
+    """
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    page_count = len(doc)
+
+    if page_count <= 1:
+        doc.close()
+        return [(file_bytes, 0)]
+
+    mid = page_count // 2
+    ranges = [(0, mid), (mid, page_count)]
+
+    parts = []
+    for start, end in ranges:
+        new_doc = fitz.open()
+        new_doc.insert_pdf(doc, from_page=start, to_page=end - 1)
+        # We return the start page index as the offset to re-sync metadata later
+        parts.append((new_doc.tobytes(), start))
+        new_doc.close()
+
+    doc.close()
+    return parts

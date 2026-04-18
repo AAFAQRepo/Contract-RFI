@@ -63,6 +63,8 @@ function UploadPage() {
   const [documents, setDocuments] = useState([])
   const [selectedDoc, setSelectedDoc] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [isProcessing, setIsProcessing] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState(null)
   const fileInputRef = useRef(null)
@@ -117,6 +119,8 @@ function UploadPage() {
     if (!file) return
     setError(null)
     setUploading(true)
+    setUploadProgress(0)
+    setIsProcessing(false)
 
     try {
       // Step 1: Get presigned URL and document_id
@@ -130,11 +134,18 @@ function UploadPage() {
       // Step 2: Upload directly to MinIO
       // We use a clean axios instance to avoid prefixed baseURL and auth headers (not needed for presigned)
       await axios.put(upload_url, file, {
-        headers: { 'Content-Type': file.type || 'application/octet-stream' }
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          setUploadProgress(percentCompleted)
+          if (percentCompleted === 100) {
+            setIsProcessing(true)
+          }
+        }
       })
 
       // Step 3: Tell backend to start processing
-      const processRes = await api.post(`/documents/${document_id}/process`, {
+      await api.post(`/documents/${document_id}/process`, {
         file_size_bytes: file.size,
       })
 
@@ -155,6 +166,8 @@ function UploadPage() {
       setError(msg)
     } finally {
       setUploading(false)
+      setUploadProgress(0)
+      setIsProcessing(false)
     }
   }
 
@@ -205,10 +218,25 @@ function UploadPage() {
         <div className="upload-icon">{uploading ? '⏳' : '📁'}</div>
         <p className="upload-text">
           {uploading
-            ? 'Uploading...'
+            ? (isProcessing ? 'Finalizing...' : `Uploading ${uploadProgress}%`)
             : 'Drop your contract here or click to browse'}
         </p>
-        <p className="upload-hint">PDF, DOCX · up to 50 MB · Arabic, Hindi, English</p>
+        
+        {uploading && (
+          <div className="progress-container" style={{ maxWidth: '300px', margin: '16px auto 0' }}>
+            <div className="progress-track">
+              {isProcessing ? (
+                <div className="progress-fill progress-indeterminate" />
+              ) : (
+                <div className="progress-fill" style={{ width: `${uploadProgress}%` }} />
+              )}
+            </div>
+          </div>
+        )}
+
+        {!uploading && (
+          <p className="upload-hint">PDF, DOCX · up to 50 MB · Arabic, Hindi, English</p>
+        )}
       </div>
 
       {/* Error */}

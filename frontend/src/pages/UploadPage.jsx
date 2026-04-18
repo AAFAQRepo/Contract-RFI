@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import axios from 'axios'
 import api from '../api/client'
 
 const STATUS_LABELS = {
@@ -117,29 +118,50 @@ function UploadPage() {
     setError(null)
     setUploading(true)
 
-    const formData = new FormData()
-    formData.append('file', file)
-
     try {
-      const res = await api.post('/documents/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      // Step 1: Get presigned URL and document_id
+      const urlRes = await api.post('/documents/upload-url', {
+        filename: file.name,
+        content_type: file.type || 'application/octet-stream',
       })
+      
+      const { document_id, upload_url } = urlRes.data
+
+      // Step 2: Upload directly to MinIO
+      // We use a clean axios instance to avoid prefixed baseURL and auth headers (not needed for presigned)
+      await axios.put(upload_url, file, {
+        headers: { 'Content-Type': file.type || 'application/octet-stream' }
+      })
+
+      // Step 3: Tell backend to start processing
+      const processRes = await api.post(`/documents/${document_id}/process`, {
+        file_size_bytes: file.size,
+      })
+
       const newDoc = {
-        id: res.data.document_id,
-        filename: res.data.filename || file.name,
+        id: document_id,
+        filename: file.name,
         status: 'processing',
-        size_mb: res.data.size_mb,
+        size_mb: round(file.size / (1024 * 1024), 2),
         language: null,
         page_count: null,
       }
+      
       setDocuments(prev => [newDoc, ...prev])
-      startPolling(newDoc.id)
+      startPolling(document_id)
     } catch (e) {
+      console.error('Upload flow failed', e)
       const msg = e.response?.data?.detail || 'Upload failed. Please try again.'
       setError(msg)
     } finally {
       setUploading(false)
     }
+  }
+
+  // Helper for size rounding since it was used in original code
+  const round = (val, precision) => {
+    const multiplier = Math.pow(10, precision || 0)
+    return Math.round(val * multiplier) / multiplier
   }
 
   const handleFileInput = (e) => {

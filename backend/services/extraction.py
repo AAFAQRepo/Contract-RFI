@@ -57,65 +57,47 @@ def _estimate_words(text: str) -> int:
     return len(text.split())
 
 
-def _ensure_str(val) -> str:
-    """Helper to ensure we have a string, joining lists if necessary."""
-    if val is None:
-        return ""
-    if isinstance(val, list):
-        return " ".join(str(i) for i in val)
-    return str(val)
-
-
-def _heading_from_block(block: dict) -> str:
-    """Return the text if this block is a header/title."""
+def _heading_from_block(block: dict) -> str | None:
+    """
+    Extract heading text from a MinerU content_list block.
+    MinerU marks headings with type='text' and level in {1,2,3,...}
+    or type='title'.
+    """
     btype = block.get("type", "")
-    if btype in ("title", "header", "header_text"):
-        # MinerU v1 uses 'text', v2 uses 'content'
-        text = block.get("text") or block.get("content")
-        return _ensure_str(text).strip()
-    
-    # Check for text_level in v1
-    if block.get("text_level"):
-        return _ensure_str(block.get("text")).strip()
-        
-    return ""
+    if btype in ("title",):
+        return (block.get("text") or "").strip() or None
+    # Some versions use level field for section headings
+    if btype == "text" and block.get("level", 0) in (1, 2):
+        text = (block.get("text") or "").strip()
+        # Heuristic: short text blocks that look like headings
+        if text and len(text) < 120 and not text.endswith("."):
+            return text
+    return None
 
 
 def _page_from_block(block: dict) -> int:
-    """Extract page number from block metadata."""
-    # MinerU content_list uses 'page_id' (0-based) or 'page_no' (1-based)
+    """Extract 1-based page number from a content_list block."""
+    # MinerU content_list uses 'page_id' (0-based in older versions, check both)
     page_id = block.get("page_id")
     if page_id is not None:
-        try:
-            return int(_ensure_str(page_id)) + 1
-        except: pass
-        
+        return int(page_id) + 1  # convert to 1-based
+    # Fallback: some versions use 'page_no' directly (1-based)
     page_no = block.get("page_no")
     if page_no is not None:
-        try:
-            return int(_ensure_str(page_no))
-        except: pass
-        
+        return int(page_no)
     return 0
 
 
 def _block_text(block: dict) -> str:
     """Get the rendered text of a content block."""
     btype = block.get("type", "")
-    
-    # Tables: Combine caption and body
+    # Tables are already rendered as markdown by MinerU
     if btype == "table":
-        caption = _ensure_str(block.get("table_caption"))
-        body = _ensure_str(block.get("table_body"))
-        return f"{caption}\n{body}".strip()
-        
-    # Images/Charts: Use caption only
-    if btype in ("image", "figure", "chart"):
-        return _ensure_str(block.get("img_caption") or block.get("chart_caption")).strip()
-        
-    # Standard text
-    text = block.get("text") or block.get("content")
-    return _ensure_str(text).strip()
+        return (block.get("table_caption") or "") + "\n" + (block.get("table_body") or "")
+    # Images: use caption only
+    if btype in ("image", "figure"):
+        return (block.get("img_caption") or "").strip()
+    return (block.get("text") or "").strip()
 
 
 def _recursive_split_text(text: str, max_words: int, overlap_words: int) -> list[str]:
@@ -294,74 +276,38 @@ def _run_mineru(
         os.environ["MINERU_TABLE_ENABLE"] = "false"
         print("⚡ Text-native PDF detected. High-speed 'txt' path enabled (MFR/Layout/Table disabled).")
 
-        from mineru.cli.common import do_parse
-        import mineru.utils.pdf_image_tools as pdf_tools
-        from mineru.backend.pipeline.batch_analyze import BatchAnalyze
-        
-        # ── Sub-100s Boost: Deep Monkey-Patch ─────────────────────────────
-        # For digital PDFs, we force the Batch Controller to skip OCR stages
-        # even if those flags are ignored by the high-level do_parse API.
-        original_dpi = pdf_tools.DEFAULT_PDF_IMAGE_DPI
+    from mineru.cli.common import do_parse
+    import mineru.utils.pdf_image_tools as pdf_tools
+    
+    # ── Sub-100s Boost: Lower DPI for digital PDFs ────────────────────
+    original_dpi = pdf_tools.DEFAULT_PDF_IMAGE_DPI
+    if parse_method == "txt":
         pdf_tools.DEFAULT_PDF_IMAGE_DPI = 72
-        
-        # 2. Hard-Kill MinerU OCR execution loops (Stage 1 definitive boost)
-        try:
-            # We patch __call__ to wrap the existing one and strip out OCR tasks
-            original_call = BatchAnalyze.__call__
-            
-            def patched_analyze_call(self, images_with_extra_info):
-                # If we are in 'txt' mode (via our DPI signal), we force OCR off for all items
-                fast_images = []
-                for img, ocr_en, lang in images_with_extra_info:
-                    fast_images.append((img, False, lang))
-                
-                # Force internal detection loops to False
-                self.text_ocr_det_batch_enabled = False
-                self.enable_ocr_det_batch = False
-                self.table_enable = False 
-                
-                logger.warning("🚫 Deep-Patch: Hard-Killed Vision-OCR Execution Loops.")
-                return original_call(self, fast_images)
-                
-            BatchAnalyze.__call__ = patched_analyze_call
-        except Exception as e:
-            logger.warning(f"⚠️ Could not Hard-Kill BatchAnalyze: {e}")
+        logger.warning("⚡ Sub-100s Boost: Lowering rendering DPI to 72.")
 
-        # 3. Suppress Post-Processor OCR and Image/Table Cutting (I/O bypass)
-        try:
-            import mineru.backend.pipeline.model_json_to_middle_json as mj
-            mj._apply_post_ocr = lambda *a, **k: None
-            mj.cut_image_and_table = lambda span, *a, **k: span
-            logger.warning("🚫 Deep-Patch: Bypassed Post-OCR and I/O Cutting.")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not patch MJ helpers: {e}")
-
-        # 4. Extract and cleanup
-        logger.warning("⚡ Sub-100s Boost: Lowering rendering DPI to 72 + OCR Hard-Kill.")
-
-        try:
-            do_parse(
-                output_dir=tmp_dir,
-                pdf_file_names=[safe_stem],
-                pdf_bytes_list=[file_bytes],
-                p_lang_list=["en"],
-                backend="pipeline",
-                parse_method=parse_method,
-                formula_enable=False if parse_method == "txt" else True,
-                table_enable=False if parse_method == "txt" else True,
-                f_dump_md=True,
-                f_dump_content_list=True,
-                f_dump_middle_json=False,
-                f_dump_model_json=False,
-                f_dump_orig_pdf=False,
-                f_draw_layout_bbox=False,
-                f_draw_span_bbox=False,
-            )
-        finally:
-            # Restore original state
-            pdf_tools.DEFAULT_PDF_IMAGE_DPI = original_dpi
-            if 'original_call' in locals():
-                BatchAnalyze.__call__ = original_call
+    try:
+        do_parse(
+            output_dir=tmp_dir,
+            pdf_file_names=[safe_stem],
+            pdf_bytes_list=[file_bytes],
+            p_lang_list=["en"],         # OCR language
+            backend="pipeline",         # CPU-safe; models load only if needed
+            parse_method=parse_method,  
+            formula_enable=False if parse_method == "txt" else True,
+            table_enable=False if parse_method == "txt" else True,
+            # Force disabling OCR-det batch for text-native paths
+            text_ocr_det_batch_enabled=False if parse_method == "txt" else True,
+            f_dump_md=True,
+            f_dump_content_list=True,
+            f_dump_middle_json=False,
+            f_dump_model_json=False,
+            f_dump_orig_pdf=False,
+            f_draw_layout_bbox=False,
+            f_draw_span_bbox=False,
+        )
+    finally:
+        # Restore original DPI
+        pdf_tools.DEFAULT_PDF_IMAGE_DPI = original_dpi
 
     # ── Locate output files properly ───────────────────────────────────
     # MinerU 3.0 creates: <output_dir>/<safe_stem>/<parse_method>/...
@@ -379,10 +325,9 @@ def _run_mineru(
     if md_files:
         md_path = str(md_files[0])
     
-    # Find the best content_list.json
-    # We prefer the standard format (v1) over v2 because our structural chunker 
-    # is optimized for its flat block structure.
-    cl_files = sorted(search_root.rglob("*content_list*.json"), key=lambda p: ("_v2" in p.name, p.name))
+    # Find the best content_list.json (v2 preferred, then v1)
+    # BUGFIX: Use *content_list*.json to match {filename}_content_list_v2.json
+    cl_files = sorted(search_root.rglob("*content_list*.json"), key=lambda p: p.name, reverse=True)
     if cl_files:
         cl_path = str(cl_files[0])
 
@@ -391,20 +336,14 @@ def _run_mineru(
     if md_path and os.path.exists(md_path):
         with open(md_path, "r", encoding="utf-8") as f:
             markdown = f.read()
+    else:
+        print(f"⚠️  MinerU: No .md files found in {search_root}")
 
-    # Read content list
-    content_list = []
+    # Read content_list
+    content_list: list[dict] = []
     if cl_path and os.path.exists(cl_path):
         with open(cl_path, "r", encoding="utf-8") as f:
-            raw_cl = json.load(f)
-            # NESTING GUARD: MinerU 3.0 v2 returns a list of lists (pages).
-            # We flatten it to a single list of blocks for our chunker.
-            if isinstance(raw_cl, list) and len(raw_cl) > 0 and isinstance(raw_cl[0], list):
-                logger.warning("📦 Stage 1: Flattening nested MinerU 3.0 content_list.")
-                for page in raw_cl:
-                    content_list.extend(page)
-            else:
-                content_list = raw_cl
+            content_list = json.load(f)
     else:
         print(f"⚠️  MinerU: No content_list.json found in {search_root}. Chunking will fall back to raw markdown split.")
 

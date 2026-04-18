@@ -276,22 +276,37 @@ def _run_mineru(
         print("⚡ Text-native PDF detected. High-speed 'txt' path enabled (MFR/Layout/Table disabled).")
 
     from mineru.cli.common import do_parse
+    import mineru.utils.pdf_image_tools as pdf_tools
+    
+    # ── Sub-100s Boost: Lower DPI for digital PDFs ────────────────────
+    original_dpi = pdf_tools.DEFAULT_PDF_IMAGE_DPI
+    if parse_method == "txt":
+        pdf_tools.DEFAULT_PDF_IMAGE_DPI = 72
+        logger.warning("⚡ Sub-100s Boost: Lowering rendering DPI to 72.")
 
-    do_parse(
-        output_dir=tmp_dir,
-        pdf_file_names=[safe_stem],
-        pdf_bytes_list=[file_bytes],
-        p_lang_list=["en"],         # OCR language
-        backend="pipeline",         # CPU-safe; models load only if needed
-        parse_method=parse_method,  
-        f_dump_md=True,
-        f_dump_content_list=True,
-        f_dump_middle_json=False,
-        f_dump_model_json=False,
-        f_dump_orig_pdf=False,
-        f_draw_layout_bbox=False,
-        f_draw_span_bbox=False,
-    )
+    try:
+        do_parse(
+            output_dir=tmp_dir,
+            pdf_file_names=[safe_stem],
+            pdf_bytes_list=[file_bytes],
+            p_lang_list=["en"],         # OCR language
+            backend="pipeline",         # CPU-safe; models load only if needed
+            parse_method=parse_method,  
+            formula_enable=False if parse_method == "txt" else True,
+            table_enable=False if parse_method == "txt" else True,
+            # Force disabling OCR-det batch for text-native paths
+            text_ocr_det_batch_enabled=False if parse_method == "txt" else True,
+            f_dump_md=True,
+            f_dump_content_list=True,
+            f_dump_middle_json=False,
+            f_dump_model_json=False,
+            f_dump_orig_pdf=False,
+            f_draw_layout_bbox=False,
+            f_draw_span_bbox=False,
+        )
+    finally:
+        # Restore original DPI
+        pdf_tools.DEFAULT_PDF_IMAGE_DPI = original_dpi
 
     # ── Locate output files properly ───────────────────────────────────
     # MinerU 3.0 creates: <output_dir>/<safe_stem>/<parse_method>/...
@@ -310,7 +325,8 @@ def _run_mineru(
         md_path = str(md_files[0])
     
     # Find the best content_list.json (v2 preferred, then v1)
-    cl_files = sorted(search_root.rglob("content_list*.json"), key=lambda p: p.name, reverse=True)
+    # BUGFIX: Use *content_list*.json to match {filename}_content_list_v2.json
+    cl_files = sorted(search_root.rglob("*content_list*.json"), key=lambda p: p.name, reverse=True)
     if cl_files:
         cl_path = str(cl_files[0])
 

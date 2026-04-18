@@ -168,8 +168,12 @@ def finalize_ingestion_task(self, document_id: str, user_id: str, filename: str)
         full_text = md_bytes.decode("utf-8")
 
         # 2. Structure-aware Chunking
+        import time
+        chunk_start = time.time()
         _update_status("processing", step="Chunking", progress=70)
         lc_docs, page_count = chunk_from_results(content_list, full_text)
+        chunk_time = time.time() - chunk_start
+        print(f"⏱️ Stage 2: Chunking complete in {chunk_time:.2f}s ({len(lc_docs)} chunks)")
 
         # 3. Language Detect & Meta Update
         language = detect_language(full_text)
@@ -181,7 +185,10 @@ def finalize_ingestion_task(self, document_id: str, user_id: str, filename: str)
 
         # 4. Embedding & Qdrant
         _update_status("processing", step="Embedding", progress=85)
+        embed_start = time.time()
         point_ids = store_parsed_chunks_in_qdrant(lc_docs, document_id, user_id, language)
+        embed_time = time.time() - embed_start
+        print(f"⏱️ Stage 2: Embedding complete in {embed_time:.2f}s")
 
         # 5. Save chunks to Postgres
         _update_status("processing", step="Finalizing", progress=95)

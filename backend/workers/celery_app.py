@@ -46,46 +46,19 @@ celery_app.conf.update(
 
 # ── Pre-warm GPU models in child worker processes ─────────────────────
 from celery.signals import worker_process_init  # noqa: E402
-from services.embedding import get_embedding_model
 
 
 @worker_process_init.connect
 def _preload_models(**kwargs):
-    """
-    Load heavy models into GPU memory when the worker process starts.
-    This runs in the child process, safe for CUDA initialization.
-    """
+    """Load the embedding model into GPU memory when the worker process starts.
+    This runs in the child process, which is safe for CUDA initialization
+    and eliminates the ~3s cold-start penalty on the first document."""
     try:
-        # 1. Warm up Embedding model
+        from services.embedding import get_embedding_model
         get_embedding_model()
         print("🔥 Embedding model pre-warmed in worker process")
-
-        # 2. Warm up Docling models (Layout, TableFormer, etc.)
-        from docling.document_converter import DocumentConverter
-        from docling.datamodel.pipeline_options import PdfPipelineOptions
-        
-        # Initialize a basic converter once to load weights into memory
-        _ = DocumentConverter(
-            format_options={
-                "pdf": PdfPipelineOptions(do_ocr=False, do_table_structure=True)
-            }
-        )
-        print("🔥 Docling models pre-warmed in worker process")
-        
     except Exception as exc:
-        print(f"⚠️  Could not pre-warm models: {exc}")
-
-
-# ── Heavy Imports (Top Level) ──────────────────────────────────────────
-import uuid as _uuid
-from datetime import datetime
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from models.models import Document, Chunk
-from services.storage import download_document
-from services.extraction import extract_and_chunk
-from services.language import detect_language
-from services.embedding import store_docling_chunks_in_qdrant
+        print(f"⚠️  Could not pre-warm embedding model: {exc}")
 
 
 @celery_app.task(name="workers.test_task")
@@ -100,6 +73,16 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
     Full async ingestion pipeline for a single document.
     Uses Docling three-tier pipeline (Lean → Enriched → OCR) + HybridChunker.
     """
+    import uuid as _uuid
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from datetime import datetime
+    from models.models import Document, Chunk
+    from services.storage import download_document
+    from services.extraction import extract_and_chunk
+    from services.language import detect_language
+    from services.embedding import store_docling_chunks_in_qdrant
+
     # Sync engine for Celery (not async)
     engine = create_engine(settings.DATABASE_URL_SYNC)
     Session = sessionmaker(bind=engine)

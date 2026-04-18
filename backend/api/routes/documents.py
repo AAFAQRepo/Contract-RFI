@@ -113,9 +113,9 @@ async def get_upload_url(
 ):
     """
     Step 1: Get a presigned MinIO URL for direct browser upload.
-    Creates a 'initializing' record in DB.
     """
-    # Validate extension
+    print(f"DEBUG: /upload-url received for {request.filename}")
+    # ... existing validation ...
     ext = Path(request.filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -136,12 +136,13 @@ async def get_upload_url(
         filename=request.filename,
         file_path=object_name,
         file_type=ext.lstrip("."),
-        status="uploading",  # Match models.py default/existing statuses
+        status="uploading",
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
     db.add(doc)
     await db.commit()
+    print(f"DEBUG: /upload-url finished for {doc_id}")
 
     return {
         "document_id": doc_id,
@@ -159,9 +160,10 @@ async def process_document_start(
 ):
     """
     Step 2: Signal that the browser has finished uploading to MinIO.
-    Starts the Celery processing task.
     """
+    print(f"DEBUG: /{doc_id}/process received. Size: {request.file_size_bytes} bytes")
     doc = await db.get(Document, doc_id)
+    # ... existing logic ...
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     

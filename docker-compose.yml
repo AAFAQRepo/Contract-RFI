@@ -52,8 +52,8 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_API_CORS_ALLOW_ORIGIN: "*"
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -81,7 +81,7 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:8000:8000"
+      - "8000:8000"
     volumes:
       - model_cache:/root/.cache
     healthcheck:
@@ -105,7 +105,7 @@ services:
     container_name: contract_rfi_frontend
     restart: always
     ports:
-      - "127.0.0.1:8080:80"
+      - "8080:80"
     depends_on:
       backend:
         condition: service_healthy

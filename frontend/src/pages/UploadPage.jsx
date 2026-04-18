@@ -63,8 +63,7 @@ function UploadPage() {
   const [documents, setDocuments] = useState([])
   const [selectedDoc, setSelectedDoc] = useState(null)
   const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [isProcessing, setIsProcessing] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0) // Added for tracking
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState(null)
   const fileInputRef = useRef(null)
@@ -120,9 +119,9 @@ function UploadPage() {
     setError(null)
     setUploading(true)
     setUploadProgress(0)
-    setIsProcessing(false)
 
     try {
+      console.log(`[${new Date().toISOString()}] Step 1: Requesting upload URL for ${file.name}...`)
       // Step 1: Get presigned URL and document_id
       const urlRes = await api.post('/documents/upload-url', {
         filename: file.name,
@@ -130,24 +129,24 @@ function UploadPage() {
       })
       
       const { document_id, upload_url } = urlRes.data
+      console.log(`[${new Date().toISOString()}] Step 2: Starting binary upload to MinIO...`)
 
       // Step 2: Upload directly to MinIO
-      // We use a clean axios instance to avoid prefixed baseURL and auth headers (not needed for presigned)
       await axios.put(upload_url, file, {
         headers: { 'Content-Type': file.type || 'application/octet-stream' },
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
           setUploadProgress(percentCompleted)
-          if (percentCompleted === 100) {
-            setIsProcessing(true)
-          }
+          console.log(`[${new Date().toISOString()}] Upload progress: ${percentCompleted}%`)
         }
       })
+      console.log(`[${new Date().toISOString()}] Step 3: Notifying backend to process...`)
 
       // Step 3: Tell backend to start processing
       await api.post(`/documents/${document_id}/process`, {
         file_size_bytes: file.size,
       })
+      console.log(`[${new Date().toISOString()}] Flow complete. Started polling for ${document_id}.`)
 
       const newDoc = {
         id: document_id,
@@ -167,7 +166,6 @@ function UploadPage() {
     } finally {
       setUploading(false)
       setUploadProgress(0)
-      setIsProcessing(false)
     }
   }
 
@@ -218,25 +216,29 @@ function UploadPage() {
         <div className="upload-icon">{uploading ? '⏳' : '📁'}</div>
         <p className="upload-text">
           {uploading
-            ? (isProcessing ? 'Finalizing...' : `Uploading ${uploadProgress}%`)
+            ? `Uploading... ${uploadProgress}%`
             : 'Drop your contract here or click to browse'}
         </p>
         
         {uploading && (
-          <div className="progress-container" style={{ maxWidth: '300px', margin: '16px auto 0' }}>
-            <div className="progress-track">
-              {isProcessing ? (
-                <div className="progress-fill progress-indeterminate" />
-              ) : (
-                <div className="progress-fill" style={{ width: `${uploadProgress}%` }} />
-              )}
-            </div>
+          <div style={{
+            width: '60%',
+            height: '4px',
+            background: 'var(--border)',
+            borderRadius: '2px',
+            marginTop: '10px',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              width: `${uploadProgress}%`,
+              height: '100%',
+              background: 'var(--accent)',
+              transition: 'width 0.2s ease-out'
+            }} />
           </div>
         )}
-
-        {!uploading && (
-          <p className="upload-hint">PDF, DOCX · up to 50 MB · Arabic, Hindi, English</p>
-        )}
+        
+        <p className="upload-hint">PDF, DOCX · up to 50 MB · Arabic, Hindi, English</p>
       </div>
 
       {/* Error */}

@@ -276,38 +276,50 @@ def _run_mineru(
         os.environ["MINERU_TABLE_ENABLE"] = "false"
         print("⚡ Text-native PDF detected. High-speed 'txt' path enabled (MFR/Layout/Table disabled).")
 
-    from mineru.cli.common import do_parse
-    import mineru.utils.pdf_image_tools as pdf_tools
-    
-    # ── Sub-100s Boost: Lower DPI for digital PDFs ────────────────────
-    original_dpi = pdf_tools.DEFAULT_PDF_IMAGE_DPI
-    if parse_method == "txt":
-        pdf_tools.DEFAULT_PDF_IMAGE_DPI = 72
-        logger.warning("⚡ Sub-100s Boost: Lowering rendering DPI to 72.")
+        from mineru.cli.common import do_parse
+        import mineru.utils.pdf_image_tools as pdf_tools
+        from mineru.backend.pipeline.batch_analyze import BatchAnalyze
+        
+        # ── Sub-100s Boost: Deep Monkey-Patch ─────────────────────────────
+        # For digital PDFs, we force the Batch Controller to skip OCR detection stages
+        # even if those flags are ignored by the high-level do_parse API.
+        original_dpi = pdf_tools.DEFAULT_PDF_IMAGE_DPI
+        original_init = BatchAnalyze.__init__
+        
+        if parse_method == "txt":
+            pdf_tools.DEFAULT_PDF_IMAGE_DPI = 72
+            
+            # Patch __init__ to force OCR disabling
+            def patched_init(self, *args, **kwargs):
+                original_init(self, *args, **kwargs)
+                self.text_ocr_det_batch_enabled = False
+                logger.warning("🚫 Deep-Patch: Suppressed Vision-OCR detection.")
+            
+            BatchAnalyze.__init__ = patched_init
+            logger.warning("⚡ Sub-100s Boost: Lowering rendering DPI to 72 + Vision-OCR Suppression.")
 
-    try:
-        do_parse(
-            output_dir=tmp_dir,
-            pdf_file_names=[safe_stem],
-            pdf_bytes_list=[file_bytes],
-            p_lang_list=["en"],         # OCR language
-            backend="pipeline",         # CPU-safe; models load only if needed
-            parse_method=parse_method,  
-            formula_enable=False if parse_method == "txt" else True,
-            table_enable=False if parse_method == "txt" else True,
-            # Force disabling OCR-det batch for text-native paths
-            text_ocr_det_batch_enabled=False if parse_method == "txt" else True,
-            f_dump_md=True,
-            f_dump_content_list=True,
-            f_dump_middle_json=False,
-            f_dump_model_json=False,
-            f_dump_orig_pdf=False,
-            f_draw_layout_bbox=False,
-            f_draw_span_bbox=False,
-        )
-    finally:
-        # Restore original DPI
-        pdf_tools.DEFAULT_PDF_IMAGE_DPI = original_dpi
+        try:
+            do_parse(
+                output_dir=tmp_dir,
+                pdf_file_names=[safe_stem],
+                pdf_bytes_list=[file_bytes],
+                p_lang_list=["en"],
+                backend="pipeline",
+                parse_method=parse_method,
+                formula_enable=False if parse_method == "txt" else True,
+                table_enable=False if parse_method == "txt" else True,
+                f_dump_md=True,
+                f_dump_content_list=True,
+                f_dump_middle_json=False,
+                f_dump_model_json=False,
+                f_dump_orig_pdf=False,
+                f_draw_layout_bbox=False,
+                f_draw_span_bbox=False,
+            )
+        finally:
+            # Restore original state
+            pdf_tools.DEFAULT_PDF_IMAGE_DPI = original_dpi
+            BatchAnalyze.__init__ = original_init
 
     # ── Locate output files properly ───────────────────────────────────
     # MinerU 3.0 creates: <output_dir>/<safe_stem>/<parse_method>/...
@@ -325,9 +337,10 @@ def _run_mineru(
     if md_files:
         md_path = str(md_files[0])
     
-    # Find the best content_list.json (v2 preferred, then v1)
-    # BUGFIX: Use *content_list*.json to match {filename}_content_list_v2.json
-    cl_files = sorted(search_root.rglob("*content_list*.json"), key=lambda p: p.name, reverse=True)
+    # Find the best content_list.json
+    # We prefer the standard format (v1) over v2 because our structural chunker 
+    # is optimized for its flat block structure.
+    cl_files = sorted(search_root.rglob("*content_list*.json"), key=lambda p: ("_v2" in p.name, p.name))
     if cl_files:
         cl_path = str(cl_files[0])
 
@@ -336,14 +349,20 @@ def _run_mineru(
     if md_path and os.path.exists(md_path):
         with open(md_path, "r", encoding="utf-8") as f:
             markdown = f.read()
-    else:
-        print(f"⚠️  MinerU: No .md files found in {search_root}")
 
-    # Read content_list
-    content_list: list[dict] = []
+    # Read content list
+    content_list = []
     if cl_path and os.path.exists(cl_path):
         with open(cl_path, "r", encoding="utf-8") as f:
-            content_list = json.load(f)
+            raw_cl = json.load(f)
+            # NESTING GUARD: MinerU 3.0 v2 returns a list of lists (pages).
+            # We flatten it to a single list of blocks for our chunker.
+            if isinstance(raw_cl, list) and len(raw_cl) > 0 and isinstance(raw_cl[0], list):
+                logger.warning("📦 Stage 1: Flattening nested MinerU 3.0 content_list.")
+                for page in raw_cl:
+                    content_list.extend(page)
+            else:
+                content_list = raw_cl
     else:
         print(f"⚠️  MinerU: No content_list.json found in {search_root}. Chunking will fall back to raw markdown split.")
 

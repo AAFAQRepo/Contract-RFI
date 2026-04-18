@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react'
-import axios from 'axios'
 import api from '../api/client'
 
 const STATUS_LABELS = {
@@ -63,7 +62,6 @@ function UploadPage() {
   const [documents, setDocuments] = useState([])
   const [selectedDoc, setSelectedDoc] = useState(null)
   const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0) // Added for tracking
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState(null)
   const fileInputRef = useRef(null)
@@ -118,61 +116,30 @@ function UploadPage() {
     if (!file) return
     setError(null)
     setUploading(true)
-    setUploadProgress(0)
+
+    const formData = new FormData()
+    formData.append('file', file)
 
     try {
-      console.log(`[${new Date().toISOString()}] Step 1: Requesting upload URL for ${file.name}...`)
-      // Step 1: Get presigned URL and document_id
-      const urlRes = await api.post('/documents/upload-url', {
-        filename: file.name,
-        content_type: file.type || 'application/octet-stream',
+      const res = await api.post('/documents/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       })
-      
-      const { document_id, upload_url } = urlRes.data
-      console.log(`[${new Date().toISOString()}] Step 2: Starting binary upload to MinIO...`)
-
-      // Step 2: Upload directly to MinIO
-      await axios.put(upload_url, file, {
-        headers: { 'Content-Type': file.type || 'application/octet-stream' },
-        onUploadProgress: (progressEvent) => {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          setUploadProgress(percentCompleted)
-          console.log(`[${new Date().toISOString()}] Upload progress: ${percentCompleted}%`)
-        }
-      })
-      console.log(`[${new Date().toISOString()}] Step 3: Notifying backend to process...`)
-
-      // Step 3: Tell backend to start processing
-      await api.post(`/documents/${document_id}/process`, {
-        file_size_bytes: file.size,
-      })
-      console.log(`[${new Date().toISOString()}] Flow complete. Started polling for ${document_id}.`)
-
       const newDoc = {
-        id: document_id,
-        filename: file.name,
+        id: res.data.document_id,
+        filename: res.data.filename || file.name,
         status: 'processing',
-        size_mb: round(file.size / (1024 * 1024), 2),
+        size_mb: res.data.size_mb,
         language: null,
         page_count: null,
       }
-      
       setDocuments(prev => [newDoc, ...prev])
-      startPolling(document_id)
+      startPolling(newDoc.id)
     } catch (e) {
-      console.error('Upload flow failed', e)
       const msg = e.response?.data?.detail || 'Upload failed. Please try again.'
       setError(msg)
     } finally {
       setUploading(false)
-      setUploadProgress(0)
     }
-  }
-
-  // Helper for size rounding since it was used in original code
-  const round = (val, precision) => {
-    const multiplier = Math.pow(10, precision || 0)
-    return Math.round(val * multiplier) / multiplier
   }
 
   const handleFileInput = (e) => {
@@ -216,28 +183,9 @@ function UploadPage() {
         <div className="upload-icon">{uploading ? '⏳' : '📁'}</div>
         <p className="upload-text">
           {uploading
-            ? `Uploading... ${uploadProgress}%`
+            ? 'Uploading...'
             : 'Drop your contract here or click to browse'}
         </p>
-        
-        {uploading && (
-          <div style={{
-            width: '60%',
-            height: '4px',
-            background: 'var(--border)',
-            borderRadius: '2px',
-            marginTop: '10px',
-            overflow: 'hidden'
-          }}>
-            <div style={{
-              width: `${uploadProgress}%`,
-              height: '100%',
-              background: 'var(--accent)',
-              transition: 'width 0.2s ease-out'
-            }} />
-          </div>
-        )}
-        
         <p className="upload-hint">PDF, DOCX · up to 50 MB · Arabic, Hindi, English</p>
       </div>
 

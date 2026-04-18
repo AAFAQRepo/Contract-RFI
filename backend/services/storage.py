@@ -3,7 +3,6 @@ MinIO storage service — upload, download, delete documents.
 """
 
 import io
-from datetime import timedelta
 from minio.error import S3Error
 from core.clients import minio_client
 from core.config import get_settings
@@ -49,15 +48,3 @@ def delete_document(object_name: str) -> None:
 def build_object_name(user_id: str, document_id: str, filename: str) -> str:
     """Build a consistent MinIO object path."""
     return f"{user_id}/{document_id}/{filename}"
-
-
-def get_presigned_upload_url(object_name: str, expires_minutes: int = 10) -> str:
-    """
-    Generate a presigned PUT URL for browser-based upload.
-    """
-    return minio_client.presigned_put_object(
-        bucket_name=settings.MINIO_BUCKET,
-        object_name=object_name,
-        expires=timedelta(minutes=expires_minutes),
-    )
-

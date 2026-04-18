@@ -116,7 +116,7 @@ services:
       dockerfile: Dockerfile
     container_name: contract_rfi_worker
     restart: always
-    command: celery -A workers.celery_app worker --loglevel=info --concurrency=3
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=2
     depends_on:
       postgres:
         condition: service_healthy

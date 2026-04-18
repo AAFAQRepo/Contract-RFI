@@ -57,47 +57,65 @@ def _estimate_words(text: str) -> int:
     return len(text.split())
 
 
-def _heading_from_block(block: dict) -> str | None:
-    """
-    Extract heading text from a MinerU content_list block.
-    MinerU marks headings with type='text' and level in {1,2,3,...}
-    or type='title'.
-    """
+def _ensure_str(val) -> str:
+    """Helper to ensure we have a string, joining lists if necessary."""
+    if val is None:
+        return ""
+    if isinstance(val, list):
+        return " ".join(str(i) for i in val)
+    return str(val)
+
+
+def _heading_from_block(block: dict) -> str:
+    """Return the text if this block is a header/title."""
     btype = block.get("type", "")
-    if btype in ("title",):
-        return (block.get("text") or "").strip() or None
-    # Some versions use level field for section headings
-    if btype == "text" and block.get("level", 0) in (1, 2):
-        text = (block.get("text") or "").strip()
-        # Heuristic: short text blocks that look like headings
-        if text and len(text) < 120 and not text.endswith("."):
-            return text
-    return None
+    if btype in ("title", "header", "header_text"):
+        # MinerU v1 uses 'text', v2 uses 'content'
+        text = block.get("text") or block.get("content")
+        return _ensure_str(text).strip()
+    
+    # Check for text_level in v1
+    if block.get("text_level"):
+        return _ensure_str(block.get("text")).strip()
+        
+    return ""
 
 
 def _page_from_block(block: dict) -> int:
-    """Extract 1-based page number from a content_list block."""
-    # MinerU content_list uses 'page_id' (0-based in older versions, check both)
+    """Extract page number from block metadata."""
+    # MinerU content_list uses 'page_id' (0-based) or 'page_no' (1-based)
     page_id = block.get("page_id")
     if page_id is not None:
-        return int(page_id) + 1  # convert to 1-based
-    # Fallback: some versions use 'page_no' directly (1-based)
+        try:
+            return int(_ensure_str(page_id)) + 1
+        except: pass
+        
     page_no = block.get("page_no")
     if page_no is not None:
-        return int(page_no)
+        try:
+            return int(_ensure_str(page_no))
+        except: pass
+        
     return 0
 
 
 def _block_text(block: dict) -> str:
     """Get the rendered text of a content block."""
     btype = block.get("type", "")
-    # Tables are already rendered as markdown by MinerU
+    
+    # Tables: Combine caption and body
     if btype == "table":
-        return (block.get("table_caption") or "") + "\n" + (block.get("table_body") or "")
-    # Images: use caption only
-    if btype in ("image", "figure"):
-        return (block.get("img_caption") or "").strip()
-    return (block.get("text") or "").strip()
+        caption = _ensure_str(block.get("table_caption"))
+        body = _ensure_str(block.get("table_body"))
+        return f"{caption}\n{body}".strip()
+        
+    # Images/Charts: Use caption only
+    if btype in ("image", "figure", "chart"):
+        return _ensure_str(block.get("img_caption") or block.get("chart_caption")).strip()
+        
+    # Standard text
+    text = block.get("text") or block.get("content")
+    return _ensure_str(text).strip()
 
 
 def _recursive_split_text(text: str, max_words: int, overlap_words: int) -> list[str]:
@@ -284,19 +302,38 @@ def _run_mineru(
         # For digital PDFs, we force the Batch Controller to skip OCR detection stages
         # even if those flags are ignored by the high-level do_parse API.
         original_dpi = pdf_tools.DEFAULT_PDF_IMAGE_DPI
-        original_init = BatchAnalyze.__init__
         
-        if parse_method == "txt":
-            pdf_tools.DEFAULT_PDF_IMAGE_DPI = 72
-            
-            # Patch __init__ to force OCR disabling
-            def patched_init(self, *args, **kwargs):
-                original_init(self, *args, **kwargs)
-                self.text_ocr_det_batch_enabled = False
+        pdf_tools.DEFAULT_PDF_IMAGE_DPI = 72
+        
+        # 2. Suppress Vision-OCR detection (Stage 1 boost)
+        try:
+            from mineru.backend.pipeline.batch_analyze import BatchAnalyze
+            BatchAnalyze.__original_init__ = BatchAnalyze.__init__
+            def patched_analyze_init(self, *args, **kwargs):
+                self.__original_init__(*args, **kwargs)
                 logger.warning("🚫 Deep-Patch: Suppressed Vision-OCR detection.")
+                self.text_ocr_det_batch_enabled = False
+            BatchAnalyze.__init__ = patched_analyze_init
+        except Exception as e:
+            logger.warning(f"⚠️ Could not patch BatchAnalyze: {e}")
+
+        # 3. Suppress Post-Processor OCR (Stage 1 boost)
+        try:
+            import mineru.backend.pipeline.model_json_to_middle_json as mj
+            def patched_apply_post_ocr(pdf_info_list, lang=None):
+                logger.warning("🚫 Deep-Patch: Bypassing Post-Processor OCR.")
+                return
+            mj._apply_post_ocr = patched_apply_post_ocr
             
-            BatchAnalyze.__init__ = patched_init
-            logger.warning("⚡ Sub-100s Boost: Lowering rendering DPI to 72 + Vision-OCR Suppression.")
+            # 4. Suppress Image/Table Cutting (I/O bypass)
+            def patched_cut_image(span, *args, **kwargs):
+                return span
+            mj.cut_image_and_table = patched_cut_image
+        except Exception as e:
+            logger.warning(f"⚠️ Could not patch ModelJsonToMiddleJson: {e}")
+
+        # 5. Extract and cleanup
+        logger.warning("⚡ Sub-100s Boost: Lowering rendering DPI to 72 + Vision-OCR Suppression.")
 
         try:
             do_parse(

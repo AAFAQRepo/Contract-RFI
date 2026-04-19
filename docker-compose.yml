@@ -61,6 +61,22 @@ services:
       timeout: 5s
       retries: 5
 
+  tei-embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:latest
+    container_name: contract_rfi_tei
+    environment:
+      - MODEL_ID=Alibaba-NLP/gte-multilingual-base
+      - PORT=80
+    volumes:
+      - model_cache:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
   # Application Services
   backend:
     build:
@@ -79,6 +95,8 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    environment:
+      - EMBEDDING_SERVICE_URL=http://tei-embeddings:80
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -115,14 +133,20 @@ services:
       dockerfile: Dockerfile
     container_name: contract_rfi_worker
     restart: always
-    command: celery -A workers.celery_app worker --loglevel=info --concurrency=3
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=5
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      tei-embeddings:
+        condition: service_started
     env_file:
       - .env
+    environment:
+      - EMBEDDING_SERVICE_URL=http://tei-embeddings:80
+      # Manage Docling's memory better to avoid fragmentation
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     volumes:
       - model_cache:/root/.cache
     deploy:

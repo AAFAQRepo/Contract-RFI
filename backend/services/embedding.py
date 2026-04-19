@@ -11,7 +11,7 @@ import uuid
 from typing import Optional
 
 import torch
-from sentence_transformers import SentenceTransformer
+import httpx
 from qdrant_client.models import PointStruct
 
 from core.config import get_settings
@@ -19,44 +19,34 @@ from core.clients import qdrant_client, QDRANT_COLLECTION
 
 settings = get_settings()
 
-# ── Model (loaded once, cached globally) ──────────────────────────────
-_model: Optional[SentenceTransformer] = None
 
-
-def get_embedding_model() -> SentenceTransformer:
-    global _model
-    if _model is None:
-        import logging
-        logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
-        print(f"⏳ Loading embedding model: {settings.EMBEDDING_MODEL}")
-        _model = SentenceTransformer(
-            settings.EMBEDDING_MODEL,
-            trust_remote_code=True,
-        )
-        _model.max_seq_length = 8192  # gte-multilingual-base supports long context
-        print("✅ Embedding model loaded")
-    return _model
-
-
-# ── Encoding helpers ──────────────────────────────────────────────────
+# ── Remote Embedding Client ───────────────────────────────────────────
 
 def embed_passages(texts: list[str]) -> list[list[float]]:
-    """Embed document passages. gte-multilingual-base needs no prefix."""
-    model = get_embedding_model()
-    embeddings = model.encode(texts, normalize_embeddings=True, show_progress_bar=True, batch_size=64)
-    
-    # Release CUDA cache to manage reported VRAM bloat
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        
-    return embeddings.tolist()
+    """
+    Embed document passages using a remote inference server (TEI).
+    This de-duplicates model VRAM across workers.
+    """
+    if not texts:
+        return []
+
+    try:
+        response = httpx.post(
+            f"{settings.EMBEDDING_SERVICE_URL}/embed",
+            json={"inputs": texts},
+            timeout=60.0
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        print(f"❌ Embedding failed via remote service: {exc}")
+        raise
 
 
 def embed_query(text: str) -> list[float]:
-    """Embed a single query. gte-multilingual-base needs no prefix."""
-    model = get_embedding_model()
-    embedding = model.encode(text, normalize_embeddings=True)
-    return embedding.tolist()
+    """Embed a single query via remote service."""
+    embeddings = embed_passages([text])
+    return embeddings[0] if embeddings else []
 
 
 # ── Qdrant storage ────────────────────────────────────────────────────

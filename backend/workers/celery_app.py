@@ -44,21 +44,7 @@ celery_app.conf.update(
 )
 
 
-# ── Pre-warm GPU models in child worker processes ─────────────────────
-from celery.signals import worker_process_init  # noqa: E402
-
-
-@worker_process_init.connect
-def _preload_models(**kwargs):
-    """Load the embedding model into GPU memory when the worker process starts.
-    This runs in the child process, which is safe for CUDA initialization
-    and eliminates the ~3s cold-start penalty on the first document."""
-    try:
-        from services.embedding import get_embedding_model
-        get_embedding_model()
-        print("🔥 Embedding model pre-warmed in worker process")
-    except Exception as exc:
-        print(f"⚠️  Could not pre-warm embedding model: {exc}")
+# Workers will hit the remote TEI endpoint for embeddings, so no local model loading is needed here.
 
 
 @celery_app.task(name="workers.test_task")
@@ -268,9 +254,9 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
         ext = filename.lower().split('.')[-1]
         
         if ext == 'pdf':
-            print("🔀 PDF detected: splitting into three parallel segments")
+            print("🔀 PDF detected: splitting into five parallel segments")
             _update_status(session, "processing", step="Splitting PDF", progress=20)
-            segments = split_pdf_into_chunks(file_bytes, n=3)
+            segments = split_pdf_into_chunks(file_bytes, n=5)
         else:
             # Single segment for non-PDFs
             segments = [(file_bytes, 0)]

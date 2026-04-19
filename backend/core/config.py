@@ -38,6 +38,7 @@ class Settings(BaseSettings):
 
     # ── Embedding ──
     EMBEDDING_MODEL: str = "Alibaba-NLP/gte-multilingual-base"
+    EMBEDDING_SERVICE_URL: str = "http://localhost:8080"
 
     # ── Reranker ──
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"

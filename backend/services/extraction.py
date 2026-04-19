@@ -110,8 +110,37 @@ _fallback_format_options = {
 
 
 def get_ocr_format_options():
-    """Factory to get OCR options based on settings (RapidOCR vs SuryaOCR)."""
-    if settings.OCR_ENGINE.lower() == "suryaocr":
+    """Factory to get OCR options based on settings (RapidOCR vs SuryaOCR vs FalconOCR)."""
+    engine = settings.OCR_ENGINE.lower()
+    
+    if engine == "falconocr":
+        try:
+            from docling.pipeline.vlm_pipeline import VlmPipeline
+            from docling.datamodel.pipeline_options import VlmConvertOptions, VlmPipelineOptions
+            
+            # Using the native falcon_ocr preset added in Docling 2.85.0
+            vlm_options = VlmConvertOptions.from_preset("falcon_ocr")
+            # We enable quantization and bfloat16 to optimize VRAM usage on the GPU server
+            pipeline_options = VlmPipelineOptions(
+                vlm_options=vlm_options,
+                allow_external_plugins=True
+            )
+            
+            return {
+                InputFormat.PDF: PdfFormatOption(
+                    pipeline_cls=VlmPipeline, 
+                    pipeline_options=pipeline_options
+                ),
+                InputFormat.IMAGE: PdfFormatOption(
+                    pipeline_cls=VlmPipeline, 
+                    pipeline_options=pipeline_options
+                ),
+            }
+        except ImportError as e:
+            print(f"⚠️  VLM Pipeline components missing ({e}); falling back to RapidOCR")
+            engine = "rapidocr"
+
+    if engine == "suryaocr":
         try:
             from docling_surya import SuryaOcrOptions
             surya_options = PdfPipelineOptions(
@@ -121,7 +150,7 @@ def get_ocr_format_options():
                 allow_external_plugins=True,
                 generate_page_images=False,
                 generate_picture_images=False,
-                ocr_options=SuryaOcrOptions(lang=["en"]), # Default to english, internal detection handles others
+                ocr_options=SuryaOcrOptions(lang=["en"]),
             )
             surya_options.table_structure_options = TableStructureOptions(
                 mode=TableFormerMode.FAST,
@@ -172,11 +201,31 @@ def _should_enable_ocr(ext: str, full_text: str, page_count: int) -> bool:
     return text_len < 1200 or chars_per_page < 180
 
 
-def _check_doc_is_scanned(doc: fitz.Document) -> tuple[bool, bool]:
+def is_scanned_pdf_fast(tmp_path: str) -> bool:
     """
-    Internal helper to check text density across first few pages.
-    Returns (is_scanned, has_usable_text_layer).
+    Near-instant check for scanned PDFs using PyMuPDF (fitz).
+    Checks text density in the digital layer to decide if OCR is primary target.
     """
+    try:
+        doc = fitz.open(tmp_path)
+        return _check_doc_is_scanned(doc)
+    except Exception as e:
+        print(f"⚠️  Fast scan detection failed: {e}")
+        return False
+
+
+def is_scanned_pdf_fast_bytes(file_bytes: bytes) -> bool:
+    """Bytes-based version of the fast scan detection."""
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        return _check_doc_is_scanned(doc)
+    except Exception as e:
+        print(f"⚠️  Fast scan detection (bytes) failed: {e}")
+        return False
+
+
+def _check_doc_is_scanned(doc: fitz.Document) -> bool:
+    """Internal helper to check text density across first few pages."""
     total_chars = 0
     page_count = len(doc)
     
@@ -187,34 +236,9 @@ def _check_doc_is_scanned(doc: fitz.Document) -> tuple[bool, bool]:
     
     doc.close()
     
-    # Heuristics:
-    chars_per_page = total_chars / check_pages if check_pages > 0 else 0
-    # 1. Is it 'scanned'? (< 150 chars/page average usually means its not a digital doc)
-    is_scanned = chars_per_page < 150
-    # 2. Does it have a 'usable' text layer? (> 10 chars/page suggests a hidden OCR layer)
-    has_text_layer = chars_per_page > 10
-    
-    return is_scanned, has_text_layer
-
-
-def is_scanned_pdf_fast(tmp_path: str) -> tuple[bool, bool]:
-    """Near-instant check for scanned PDFs. Returns (is_scanned, has_usable_text_layer)."""
-    try:
-        doc = fitz.open(tmp_path)
-        return _check_doc_is_scanned(doc)
-    except Exception as e:
-        print(f"⚠️  Fast scan detection failed: {e}")
-        return False, False
-
-
-def is_scanned_pdf_fast_bytes(file_bytes: bytes) -> tuple[bool, bool]:
-    """Bytes-based version of the fast scan detection. Returns (is_scanned, has_usable_text_layer)."""
-    try:
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        return _check_doc_is_scanned(doc)
-    except Exception as e:
-        print(f"⚠️  Fast scan detection (bytes) failed: {e}")
-        return False, False
+    # Heuristic: less than 100 characters per page average in digital layer suggests scanned/image.
+    avg_chars = total_chars / max(1, check_pages)
+    return avg_chars < 100
 
 
 def _needs_table_enrichment(document: Any) -> bool:
@@ -330,9 +354,15 @@ def _build_lc_docs_from_document(document: Any, offset_page_no: int = 0) -> list
 
 
 def _convert_with_ocr(tmp_path: str):
-    """Convert document with OCR path (SuryaOCR/RapidOCR preferred, Tesseract fallback)."""
+    """Convert document with OCR path (FalconOCR/SuryaOCR/RapidOCR preferred, Tesseract fallback)."""
     format_options = get_ocr_format_options()
-    engine_name = "SuryaOCR" if settings.OCR_ENGINE.lower() == "suryaocr" else "RapidOCR"
+    
+    engine_map = {
+        "falconocr": "Falcon-OCR (VLM)",
+        "suryaocr": "SuryaOCR",
+        "rapidocr": "RapidOCR"
+    }
+    engine_name = engine_map.get(settings.OCR_ENGINE.lower(), "RapidOCR")
     
     print(f"🔍 Using OCR Engine: {engine_name}")
     converter = DocumentConverter(format_options=format_options)
@@ -389,33 +419,15 @@ def extract_and_chunk(
 
         # ── Step 1: Convert document ──────────────────────────────────────
         if ext == ".pdf":
-            is_scanned, has_text_layer = is_scanned_pdf_fast(tmp_path)
-            strategy = settings.OCR_STRATEGY.lower()
-
-            # — Decision Logic for Turbo Latency ——————————————————————————————
-            jump_to_ocr = False
-            if strategy == "force_ocr":
-                jump_to_ocr = True
-            elif strategy == "digital_only":
-                jump_to_ocr = False
-            elif is_scanned:
-                # auto-detect: if scanned but has NO text layer, we MUST OCR.
-                # if scanned BUT has a text layer, we might skip OCR for speed (Turbo).
-                if not has_text_layer:
-                    jump_to_ocr = True
-                else:
-                    # Searchable scanned PDF. If we want <10s for 50 pages, we use the layer.
-                    print("🧾 Searchable scanned PDF detected. Using existing layer for speed (Turbo).")
-                    jump_to_ocr = False
-
-            if jump_to_ocr:
-                print(f"🧾 Logic: Jumping to Tier 3 ({settings.OCR_ENGINE})")
+            # — Fast Detection: Skip Lean/Enriched if confirmed scanned ——————
+            if is_scanned_pdf_fast(tmp_path):
+                print("🧾 Fast detection: Scanned PDF confirmed. Jumping to Tier 3 (OCR)")
                 result, converter = _convert_with_ocr(tmp_path)
                 full_text = result.document.export_to_markdown()
                 page_count = _get_page_count(result)
             else:
                 # — Tier 1: Lean parse (no OCR, no table structure) ————————————
-                print("⚡ Tier 1 (lean): parsing PDF using programmatic text layer")
+                print("⚡ Tier 1 (lean): parsing PDF without OCR or table structure")
                 converter = DocumentConverter(format_options=_lean_format_options)
                 result = converter.convert(tmp_path)
                 full_text = result.document.export_to_markdown()
@@ -423,13 +435,13 @@ def extract_and_chunk(
                 t_lean = time.time() - t0
                 print(f"   Lean parse done in {t_lean:.1f}s — {page_count} pages, {len(full_text)} chars")
 
-                # If Tier 1 was used but results are empty after all, fallback to OCR unless digital_only
-                if not full_text.strip() and strategy != "digital_only":
-                    print("⚠️  Lean parse produced no text; falling back to OCR")
+                if _should_enable_ocr(ext=ext, full_text=full_text, page_count=page_count):
+                    # — Tier 3: OCR path (scanned PDF fallback) —————————————————
+                    print("🧾 Low text density detected; switching to Tier 3 (OCR)")
                     result, converter = _convert_with_ocr(tmp_path)
                     full_text = result.document.export_to_markdown()
                     page_count = _get_page_count(result)
-                elif _needs_table_enrichment(result.document) and strategy != "digital_only":
+                elif _needs_table_enrichment(result.document):
                     # — Tier 2: Enriched parse (table-heavy PDF) ———————————————
                     t1 = time.time()
                     table_count = sum(

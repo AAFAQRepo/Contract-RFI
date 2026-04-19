@@ -10,6 +10,8 @@ Stores retrieval chunk embeddings in Qdrant.
 import uuid
 from typing import Optional
 
+import time
+from concurrent.futures import ThreadPoolExecutor
 import torch
 import httpx
 from qdrant_client.models import PointStruct

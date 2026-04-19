@@ -77,6 +77,12 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
 
   # Application Services
   backend:
@@ -93,6 +99,8 @@ services:
       qdrant:
         condition: service_started
       minio:
+        condition: service_healthy
+      tei-embeddings:
         condition: service_healthy
     env_file:
       - .env
@@ -141,7 +149,7 @@ services:
       redis:
         condition: service_healthy
       tei-embeddings:
-        condition: service_started
+        condition: service_healthy
     env_file:
       - .env
     environment:

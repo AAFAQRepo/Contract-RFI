@@ -254,9 +254,19 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
         ext = filename.lower().split('.')[-1]
         
         if ext == 'pdf':
-            print("🔀 PDF detected: splitting into five parallel segments")
-            _update_status(session, "processing", step="Splitting PDF", progress=20)
-            segments = split_pdf_into_chunks(file_bytes, n=5)
+            # Dynamic splitting logic: target ~75 pages per worker, capped at 8 workers
+            import fitz
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            total_pages = len(doc)
+            doc.close()
+            
+            num_segments = max(2, min(8, total_pages // 75))
+            if total_pages < 75:
+                num_segments = 2 # Minimum 2 for small PDFs to maintain parallel path
+                
+            print(f"🔀 PDF detected ({total_pages} pages): splitting into {num_segments} parallel segments")
+            _update_status(session, "processing", step=f"Splitting PDF into {num_segments} parts", progress=20)
+            segments = split_pdf_into_chunks(file_bytes, n=num_segments)
         else:
             # Single segment for non-PDFs
             segments = [(file_bytes, 0)]

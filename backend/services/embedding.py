@@ -22,45 +22,57 @@ settings = get_settings()
 
 # ── Remote Embedding Client ───────────────────────────────────────────
 
+# Global client for connection pooling (Industry standard for microservices)
+_http_client = httpx.Client(
+    timeout=60.0, 
+    limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
+)
+
+def _send_single_batch(batch: list[str], attempt_info: str = "") -> list[list[float]]:
+    """Helper function to send a single batch to TEI with retry logic."""
+    max_retries = 3
+    retry_delay = 2
+    for attempt in range(max_retries):
+        try:
+            response = _http_client.post(
+                f"{settings.EMBEDDING_SERVICE_URL}/embed",
+                json={"inputs": batch}
+            )
+            response.raise_for_status()
+            return response.json()
+        except (httpx.ConnectError, httpx.ConnectTimeout) as net_exc:
+            if attempt < max_retries - 1:
+                print(f"⚠️  {attempt_info} attempt {attempt+1} failed: {net_exc}. Retrying...")
+                time.sleep(retry_delay)
+                continue
+            raise
+        except Exception as exc:
+            print(f"❌ {attempt_info} failed: {exc}")
+            raise
+    return []
+
 def embed_passages(texts: list[str], batch_size: int = 32) -> list[list[float]]:
     """
     Embed document passages using a remote inference server (TEI).
-    Uses sub-batching to respect server-side limits and payload caps.
-    Includes persistent retry logic for transient network/DNS issues.
+    Uses CONCURRENT sub-batching to maximize TEI's internal throughput.
     """
     if not texts:
         return []
 
-    all_embeddings = []
+    # Create sub-batches
+    batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
     
-    # Process in sub-batches (Industry standard for robustness)
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i : i + batch_size]
-        
-        # Retry loop for networking/DNS stability
-        max_retries = 3
-        retry_delay = 2  # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                response = httpx.post(
-                    f"{settings.EMBEDDING_SERVICE_URL}/embed",
-                    json={"inputs": batch},
-                    timeout=60.0
-                )
-                response.raise_for_status()
-                all_embeddings.extend(response.json())
-                break  # Success!
-            except (httpx.ConnectError, httpx.ConnectTimeout) as net_exc:
-                if attempt < max_retries - 1:
-                    print(f"⚠️  Inference connection attempt {attempt+1} failed: {net_exc}. Retrying in {retry_delay}s...")
-                    time.sleep(retry_delay)
-                    continue
-                print(f"❌ Permanent connection failure to embedding service: {net_exc}")
-                raise
-            except Exception as exc:
-                print(f"❌ Embedding failed via remote service at batch {i//batch_size}: {exc}")
-                raise
+    # Process batches CONCURRENTLY
+    # This hits TEI's continuous batching engine all at once
+    all_embeddings = []
+    with ThreadPoolExecutor(max_workers=min(len(batches), 20)) as executor:
+        # Use map to preserve order easily
+        futures = [
+            executor.submit(_send_single_batch, b, f"Batch {i}") 
+            for i, b in enumerate(batches)
+        ]
+        for future in futures:
+            all_embeddings.extend(future.result())
             
     return all_embeddings
 

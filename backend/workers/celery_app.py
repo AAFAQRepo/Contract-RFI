@@ -218,7 +218,7 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
     from datetime import datetime
     from models.models import Document
     from services.storage import download_document
-    from services.extraction import split_pdf_in_half
+    from services.extraction import split_pdf_into_chunks
 
     engine = create_engine(settings.DATABASE_URL_SYNC)
     Session = sessionmaker(bind=engine)
@@ -253,9 +253,9 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
         ext = filename.lower().split('.')[-1]
         
         if ext == 'pdf':
-            print("🔀 PDF detected: splitting into two parallel segments")
+            print("🔀 PDF detected: splitting into three parallel segments")
             _update_status(session, "processing", step="Splitting PDF", progress=20)
-            segments = split_pdf_in_half(file_bytes)
+            segments = split_pdf_into_chunks(file_bytes, n=3)
         else:
             # Single segment for non-PDFs
             segments = [(file_bytes, 0)]

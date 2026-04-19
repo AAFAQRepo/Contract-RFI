@@ -396,10 +396,10 @@ def _estimate_page_count(document) -> int:
     return max_page if max_page > 0 else 1
 
 
-def split_pdf_in_half(file_bytes: bytes) -> list[tuple[bytes, int]]:
+def split_pdf_into_chunks(file_bytes: bytes, n: int = 2) -> list[tuple[bytes, int]]:
     """
-    Split a PDF into two equal parts based on page count.
-    Used for parallel processing across workers.
+    Split a PDF into N equal parts based on page count.
+    Used for parallel processing across multiple workers.
 
     Returns:
         A list of (part_bytes, offset_page_no)
@@ -407,15 +407,31 @@ def split_pdf_in_half(file_bytes: bytes) -> list[tuple[bytes, int]]:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     page_count = len(doc)
 
+    if page_count < n:
+        # If fewer pages than requested chunks, just do one page per chunk (or original if 1)
+        n = max(1, page_count)
+
     if page_count <= 1:
         doc.close()
         return [(file_bytes, 0)]
 
-    mid = page_count // 2
-    ranges = [(0, mid), (mid, page_count)]
+    # Calculate page ranges for N chunks
+    chunk_size = page_count // n
+    remainder = page_count % n
+    
+    ranges = []
+    current_page = 0
+    for i in range(n):
+        # Distribute remainder pages across the first few chunks
+        extra = 1 if i < remainder else 0
+        end_page = current_page + chunk_size + extra
+        ranges.append((current_page, end_page))
+        current_page = end_page
 
     parts = []
     for start, end in ranges:
+        if start >= end:
+            continue
         new_doc = fitz.open()
         new_doc.insert_pdf(doc, from_page=start, to_page=end - 1)
         # We return the start page index as the offset to re-sync metadata later

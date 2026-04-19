@@ -27,6 +27,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
     libgomp1 \
+    && curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb \
+    && dpkg -i /tmp/cuda-keyring.deb \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    libcudnn9-cuda-12 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create and activate virtual environment

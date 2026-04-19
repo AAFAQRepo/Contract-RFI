@@ -270,7 +270,10 @@ def extract_and_chunk(
     file_bytes: bytes,
     filename: str,
     offset_page_no: int = 0,
+    force_ocr: bool = False,
 ) -> tuple[list, str, int]:
+    import onnxruntime as ort
+    print(f"📡 ONNX Runtime Providers: {ort.get_available_providers()}")
     """
     Extract text from a document and chunk it using Docling's HybridChunker.
 
@@ -310,17 +313,18 @@ def extract_and_chunk(
         # ── Step 1: Convert document ──────────────────────────────────────
         if ext == ".pdf":
             # — Tier 1: Lean parse (no OCR, no table structure) ————————————
-            print("⚡ Tier 1 (lean): parsing PDF without OCR or table structure")
-            converter = DocumentConverter(format_options=_lean_format_options)
-            result = converter.convert(tmp_path)
-            full_text = result.document.export_to_markdown()
-            page_count = _get_page_count(result)
-            t_lean = time.time() - t0
-            print(f"   Lean parse done in {t_lean:.1f}s — {page_count} pages, {len(full_text)} chars")
+            if not force_ocr:
+                print("⚡ Tier 1 (lean): parsing PDF without OCR or table structure")
+                converter = DocumentConverter(format_options=_lean_format_options)
+                result = converter.convert(tmp_path)
+                full_text = result.document.export_to_markdown()
+                page_count = _get_page_count(result)
+                t_lean = time.time() - t0
+                print(f"   Lean parse done in {t_lean:.1f}s — {page_count} pages, {len(full_text)} chars")
 
-            if _should_enable_ocr(ext=ext, full_text=full_text, page_count=page_count):
+            if force_ocr or _should_enable_ocr(ext=ext, full_text=full_text, page_count=page_count):
                 # — Tier 3: OCR path (scanned PDF) ————————————————————————
-                print("🧾 Low text density detected; switching to Tier 3 (OCR)")
+                print(f"🧾 {'Forced OCR' if force_ocr else 'Low text density detected'}; switching to Tier 3 (OCR)")
                 result, converter = _convert_with_ocr(tmp_path)
                 full_text = result.document.export_to_markdown()
                 page_count = _get_page_count(result)

@@ -141,6 +141,46 @@ def _should_enable_ocr(ext: str, full_text: str, page_count: int) -> bool:
     return text_len < 1200 or chars_per_page < 180
 
 
+def is_scanned_pdf_fast(tmp_path: str) -> bool:
+    """
+    Near-instant check for scanned PDFs using PyMuPDF (fitz).
+    Checks text density in the digital layer to decide if OCR is primary target.
+    """
+    try:
+        doc = fitz.open(tmp_path)
+        return _check_doc_is_scanned(doc)
+    except Exception as e:
+        print(f"⚠️  Fast scan detection failed: {e}")
+        return False
+
+
+def is_scanned_pdf_fast_bytes(file_bytes: bytes) -> bool:
+    """Bytes-based version of the fast scan detection."""
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        return _check_doc_is_scanned(doc)
+    except Exception as e:
+        print(f"⚠️  Fast scan detection (bytes) failed: {e}")
+        return False
+
+
+def _check_doc_is_scanned(doc: fitz.Document) -> bool:
+    """Internal helper to check text density across first few pages."""
+    total_chars = 0
+    page_count = len(doc)
+    
+    # Check first few pages for efficiency (scanned docs are usually consistent)
+    check_pages = min(5, page_count)
+    for i in range(check_pages):
+        total_chars += len(doc[i].get_text().strip())
+    
+    doc.close()
+    
+    # Heuristic: less than 100 characters per page average in digital layer suggests scanned/image.
+    avg_chars = total_chars / max(1, check_pages)
+    return avg_chars < 100
+
+
 def _needs_table_enrichment(document: Any) -> bool:
     """
     Check whether the lean-parsed document contains enough table blocks
@@ -270,10 +310,7 @@ def extract_and_chunk(
     file_bytes: bytes,
     filename: str,
     offset_page_no: int = 0,
-    force_ocr: bool = False,
 ) -> tuple[list, str, int]:
-    import onnxruntime as ort
-    print(f"📡 ONNX Runtime Providers: {ort.get_available_providers()}")
     """
     Extract text from a document and chunk it using Docling's HybridChunker.
 
@@ -312,8 +349,14 @@ def extract_and_chunk(
 
         # ── Step 1: Convert document ──────────────────────────────────────
         if ext == ".pdf":
-            # — Tier 1: Lean parse (no OCR, no table structure) ————————————
-            if not force_ocr:
+            # — Fast Detection: Skip Lean/Enriched if confirmed scanned ——————
+            if is_scanned_pdf_fast(tmp_path):
+                print("🧾 Fast detection: Scanned PDF confirmed. Jumping to Tier 3 (OCR)")
+                result, converter = _convert_with_ocr(tmp_path)
+                full_text = result.document.export_to_markdown()
+                page_count = _get_page_count(result)
+            else:
+                # — Tier 1: Lean parse (no OCR, no table structure) ————————————
                 print("⚡ Tier 1 (lean): parsing PDF without OCR or table structure")
                 converter = DocumentConverter(format_options=_lean_format_options)
                 result = converter.convert(tmp_path)
@@ -322,28 +365,28 @@ def extract_and_chunk(
                 t_lean = time.time() - t0
                 print(f"   Lean parse done in {t_lean:.1f}s — {page_count} pages, {len(full_text)} chars")
 
-            if force_ocr or _should_enable_ocr(ext=ext, full_text=full_text, page_count=page_count):
-                # — Tier 3: OCR path (scanned PDF) ————————————————————————
-                print(f"🧾 {'Forced OCR' if force_ocr else 'Low text density detected'}; switching to Tier 3 (OCR)")
-                result, converter = _convert_with_ocr(tmp_path)
-                full_text = result.document.export_to_markdown()
-                page_count = _get_page_count(result)
-            elif _needs_table_enrichment(result.document):
-                # — Tier 2: Enriched parse (table-heavy PDF) ———————————————
-                t1 = time.time()
-                table_count = sum(
-                    1 for item in getattr(result.document, "body", [])
-                    if "table" in str(getattr(item, "label", "")).lower()
-                )
-                print(f"📊 Detected {table_count} tables; switching to Tier 2 (FAST table structure)")
-                converter = DocumentConverter(format_options=_enriched_format_options)
-                result = converter.convert(tmp_path)
-                full_text = result.document.export_to_markdown()
-                page_count = _get_page_count(result)
-                t_enrich = time.time() - t1
-                print(f"   Enriched parse done in {t_enrich:.1f}s")
-            else:
-                print("✅ Text-rich PDF with few/no tables; lean parse is sufficient")
+                if _should_enable_ocr(ext=ext, full_text=full_text, page_count=page_count):
+                    # — Tier 3: OCR path (scanned PDF fallback) —————————————————
+                    print("🧾 Low text density detected; switching to Tier 3 (OCR)")
+                    result, converter = _convert_with_ocr(tmp_path)
+                    full_text = result.document.export_to_markdown()
+                    page_count = _get_page_count(result)
+                elif _needs_table_enrichment(result.document):
+                    # — Tier 2: Enriched parse (table-heavy PDF) ———————————————
+                    t1 = time.time()
+                    table_count = sum(
+                        1 for item in getattr(result.document, "body", [])
+                        if "table" in str(getattr(item, "label", "")).lower()
+                    )
+                    print(f"📊 Detected {table_count} tables; switching to Tier 2 (FAST table structure)")
+                    converter = DocumentConverter(format_options=_enriched_format_options)
+                    result = converter.convert(tmp_path)
+                    full_text = result.document.export_to_markdown()
+                    page_count = _get_page_count(result)
+                    t_enrich = time.time() - t1
+                    print(f"   Enriched parse done in {t_enrich:.1f}s")
+                else:
+                    print("✅ Text-rich PDF with few/no tables; lean parse is sufficient")
 
         else:
             # Non-PDF formats always go through OCR path

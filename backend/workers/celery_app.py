@@ -54,7 +54,7 @@ def test_task(message: str) -> dict:
 
 
 @celery_app.task(name="workers.extract_chunk_task", max_retries=3)
-def extract_chunk_task(chunk_bytes: bytes, filename: str, offset_page_no: int, force_ocr: bool = False) -> tuple[list[dict], list[list[float]], str, int]:
+def extract_chunk_task(chunk_bytes: bytes, filename: str, offset_page_no: int) -> tuple[list[dict], list[list[float]], str, int]:
     """
     Worker task: Extracts text AND generates embeddings for a PDF chunk.
     Distributing embedding inference across workers improves speed and spreads GPU load.
@@ -63,7 +63,7 @@ def extract_chunk_task(chunk_bytes: bytes, filename: str, offset_page_no: int, f
     from services.extraction import extract_and_chunk
     from services.embedding import embed_passages
 
-    lc_docs, full_text, page_count = extract_and_chunk(chunk_bytes, filename, offset_page_no, force_ocr=force_ocr)
+    lc_docs, full_text, page_count = extract_and_chunk(chunk_bytes, filename, offset_page_no)
 
     # NEW: Perform embedding inference in parallel within this worker
     texts = [d.page_content for d in lc_docs]
@@ -255,29 +255,28 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
         
         if ext == 'pdf':
             # Dynamic splitting logic: target ~75 pages per worker, capped at 8 workers
+            # For scanned docs, we target ~15 pages per worker for better OCR parallelism
+            from services.extraction import is_scanned_pdf_fast_bytes
+            is_scanned = is_scanned_pdf_fast_bytes(file_bytes)
+            
             import fitz
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             total_pages = len(doc)
-            
-            # QUICK SCANNED CHECK: If first page of a multiple-page PDF has zero text, assume scanned
-            first_page_text = doc[0].get_text().strip()
-            force_ocr = len(first_page_text) < 100
-            if force_ocr:
-                print(f"🔍 Scanned PDF detected (p1 char count: {len(first_page_text)}). Enabling Fast-OCR path.")
-            
             doc.close()
             
-            num_segments = max(2, min(8, total_pages // 75))
-            if total_pages < 75:
-                num_segments = 2 # Minimum 2 for small PDFs to maintain parallel path
+            if is_scanned:
+                num_segments = max(2, min(12, (total_pages + 14) // 15))
+                type_msg = "Scanned PDF"
+            else:
+                num_segments = max(2, min(8, (total_pages + 74) // 75))
+                type_msg = "Digital PDF"
                 
-            print(f"🔀 PDF detected ({total_pages} pages): splitting into {num_segments} parallel segments")
-            _update_status(session, "processing", step=f"Splitting PDF into {num_segments} parts", progress=20)
+            print(f"🔀 {type_msg} detected ({total_pages} pages): splitting into {num_segments} parallel segments")
+            _update_status(session, "processing", step=f"Splitting {type_msg} into {num_segments} parts", progress=20)
             segments = split_pdf_into_chunks(file_bytes, n=num_segments)
         else:
             # Single segment for non-PDFs
             segments = [(file_bytes, 0)]
-            force_ocr = True # Images always need OCR
 
         # 3. Create Chord: Map (Extract) -> Reduce (Finalize)
         _update_status(session, "processing", step=f"Dispatching {len(segments)} workers", progress=30)
@@ -289,7 +288,7 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
         )
         
         header = [
-            extract_chunk_task.s(chunk_bytes, filename, offset, force_ocr)
+            extract_chunk_task.s(chunk_bytes, filename, offset)
             for chunk_bytes, offset in segments
         ]
         

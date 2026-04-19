@@ -27,10 +27,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
     libgomp1 \
-    && curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb \
-    && dpkg -i /tmp/cuda-keyring.deb \
-    && apt-get update && apt-get install -y --no-install-recommends \
-    libcudnn9-cuda-12 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create and activate virtual environment
@@ -48,8 +44,10 @@ RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download OCR models so they are baked into the image (No cold starts)
-RUN python3.12 -c "from rapidocr_onnxruntime import RapidOCR; r = RapidOCR(); print('✅ OCR Models Pre-cached')"
+# Pre-download models to avoid on-the-fly downloads at runtime
+# We copy only the tools directory first to avoid cache bust on code changes
+COPY tools/download_models.py tools/
+RUN python tools/download_models.py
 
 # Copy application code
 COPY . .

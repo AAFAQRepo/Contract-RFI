@@ -64,7 +64,6 @@ services:
   tei-embeddings:
     image: ghcr.io/huggingface/text-embeddings-inference:latest
     container_name: contract_rfi_tei
-    # Optimized limits for GTE model: 16k batch tokens, 1k client batch, 8k sequence length
     command: --model-id Alibaba-NLP/gte-multilingual-base --port 80 --max-batch-tokens 16384 --max-client-batch-size 1024
     environment:
       - PORT=80

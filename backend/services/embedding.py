@@ -10,6 +10,7 @@ Stores retrieval chunk embeddings in Qdrant.
 import uuid
 from typing import Optional
 
+import torch
 from sentence_transformers import SentenceTransformer
 from qdrant_client.models import PointStruct
 
@@ -43,6 +44,11 @@ def embed_passages(texts: list[str]) -> list[list[float]]:
     """Embed document passages. gte-multilingual-base needs no prefix."""
     model = get_embedding_model()
     embeddings = model.encode(texts, normalize_embeddings=True, show_progress_bar=True, batch_size=64)
+    
+    # Release CUDA cache to manage reported VRAM bloat
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        
     return embeddings.tolist()
 
 
@@ -120,6 +126,28 @@ def store_docling_chunks_in_qdrant(
 
     texts = [doc.page_content for doc in lc_docs]
     embeddings = embed_passages(texts)
+    
+    return store_precomputed_chunks_in_qdrant(
+        lc_docs=lc_docs,
+        embeddings=embeddings,
+        document_id=document_id,
+        user_id=user_id,
+        language=language
+    )
+
+
+def store_precomputed_chunks_in_qdrant(
+    lc_docs: list,
+    embeddings: list[list[float]],
+    document_id: str,
+    user_id: str,
+    language: str,
+) -> list[str]:
+    """
+    Upsert pre-computed Docling chunks into Qdrant.
+    """
+    if not lc_docs or not embeddings:
+        return []
 
     points = []
     point_ids = []
@@ -170,5 +198,5 @@ def store_docling_chunks_in_qdrant(
         batch = points[i : i + batch_size]
         qdrant_client.upsert(collection_name=QDRANT_COLLECTION, points=batch)
 
-    print(f"✅ Stored {len(points)} Docling vectors in Qdrant")
+    print(f"✅ Stored {len(points)} pre-computed vectors in Qdrant")
     return point_ids

@@ -68,20 +68,27 @@ def test_task(message: str) -> dict:
 
 
 @celery_app.task(name="workers.extract_chunk_task", max_retries=3)
-def extract_chunk_task(chunk_bytes: bytes, filename: str, offset_page_no: int) -> tuple[list[dict], str, int]:
+def extract_chunk_task(chunk_bytes: bytes, filename: str, offset_page_no: int) -> tuple[list[dict], list[list[float]], str, int]:
     """
-    Worker task to extract text from a specific PDF chunk or file.
-    Returns (serialized_lc_docs, full_text, page_count).
+    Worker task: Extracts text AND generates embeddings for a PDF chunk.
+    Distributing embedding inference across workers improves speed and spreads GPU load.
+    Returns (serialized_lc_docs, embeddings, full_text, page_count).
     """
     from services.extraction import extract_and_chunk
+    from services.embedding import embed_passages
+
     lc_docs, full_text, page_count = extract_and_chunk(chunk_bytes, filename, offset_page_no)
+
+    # NEW: Perform embedding inference in parallel within this worker
+    texts = [d.page_content for d in lc_docs]
+    embeddings = embed_passages(texts)
 
     # Serialize for Celery JSON compatibility
     serialized_docs = [
         {"page_content": d.page_content, "metadata": d.metadata}
         for d in lc_docs
     ]
-    return serialized_docs, full_text, page_count
+    return serialized_docs, embeddings, full_text, page_count
 
 
 @celery_app.task(name="workers.finalize_document_ingestion")
@@ -99,19 +106,20 @@ def finalize_document_ingestion(results, document_id: str, user_id: str, filenam
     from services.embedding import store_docling_chunks_in_qdrant
     from services.extraction import _ChunkDoc  # For type hinting if needed
 
-    # results is a list of [serialized_docs, full_text, page_count]
+    # results is a list of [serialized_docs, embeddings, full_text, page_count]
     all_lc_docs = []
+    all_embeddings = []
     merged_full_text_parts = []
     total_page_count = 0
 
     # Sort results by offset (implicitly stored in results order if using chord)
-    # Actually, Celery chord results are in the order of the group.
-    for sc_docs, full_text, page_count in results:
+    for sc_docs, embeddings, full_text, page_count in results:
         # Reconstruct _ChunkDoc objects
         all_lc_docs.extend([
             _ChunkDoc(page_content=d["page_content"], metadata=d["metadata"])
             for d in sc_docs
         ])
+        all_embeddings.extend(embeddings)
         if full_text:
             merged_full_text_parts.append(full_text)
         total_page_count += page_count
@@ -151,12 +159,19 @@ def finalize_document_ingestion(results, document_id: str, user_id: str, filenam
             doc.updated_at = datetime.utcnow()
             session.commit()
 
-        _update_status(session, "processing", step="Embedding chunks", progress=70)
+        _update_status(session, "processing", step="Saving to database", progress=70)
 
-        # 3. Embed + store chunks in Qdrant
-        print(f"🔢 Embedding {len(all_lc_docs)} merged chunks...")
-        point_ids = store_docling_chunks_in_qdrant(all_lc_docs, document_id, user_id, language)
-        _update_status(session, "processing", step="Saving to database", progress=90)
+        # 3. Store pre-computed chunks in Qdrant (NO inference here)
+        print(f"💾 Storing {len(all_lc_docs)} merged chunks in Qdrant (using pre-computed vectors)...")
+        from services.embedding import store_precomputed_chunks_in_qdrant
+        point_ids = store_precomputed_chunks_in_qdrant(
+            all_lc_docs, 
+            all_embeddings, 
+            document_id, 
+            user_id, 
+            language
+        )
+        _update_status(session, "processing", step="Finalizing database", progress=90)
 
         # 4. Store chunks in PostgreSQL
         print(f"💾 Storing {len(all_lc_docs)} chunks in database...")

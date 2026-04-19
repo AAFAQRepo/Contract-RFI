@@ -22,25 +22,32 @@ settings = get_settings()
 
 # ── Remote Embedding Client ───────────────────────────────────────────
 
-def embed_passages(texts: list[str]) -> list[list[float]]:
+def embed_passages(texts: list[str], batch_size: int = 32) -> list[list[float]]:
     """
     Embed document passages using a remote inference server (TEI).
-    This de-duplicates model VRAM across workers.
+    Uses sub-batching to respect server-side limits and payload caps.
     """
     if not texts:
         return []
 
-    try:
-        response = httpx.post(
-            f"{settings.EMBEDDING_SERVICE_URL}/embed",
-            json={"inputs": texts},
-            timeout=60.0
-        )
-        response.raise_for_status()
-        return response.json()
-    except Exception as exc:
-        print(f"❌ Embedding failed via remote service: {exc}")
-        raise
+    all_embeddings = []
+    
+    # Process in sub-batches (Industry standard for robustness)
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        try:
+            response = httpx.post(
+                f"{settings.EMBEDDING_SERVICE_URL}/embed",
+                json={"inputs": batch},
+                timeout=60.0
+            )
+            response.raise_for_status()
+            all_embeddings.extend(response.json())
+        except Exception as exc:
+            print(f"❌ Embedding failed via remote service at batch {i//batch_size}: {exc}")
+            raise
+            
+    return all_embeddings
 
 
 def embed_query(text: str) -> list[float]:

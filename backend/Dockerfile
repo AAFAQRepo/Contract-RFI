@@ -44,6 +44,9 @@ RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download OCR models so they are baked into the image (No cold starts)
+RUN python3.12 -c "from rapidocr_onnxruntime import RapidOCR; r = RapidOCR(); print('✅ OCR Models Pre-cached')"
+
 # Copy application code
 COPY . .
 

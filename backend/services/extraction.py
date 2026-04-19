@@ -81,7 +81,10 @@ _ocr_pipeline_options = PdfPipelineOptions(
     allow_external_plugins=False,
     generate_page_images=False,
     generate_picture_images=False,
-    ocr_options=RapidOcrOptions(),
+    ocr_options=RapidOcrOptions(
+        use_cuda=True,      # Forced GPU acceleration
+        use_dnn_cls=False   # Skip orientation detection to save ~2s per page
+    ),
 )
 _ocr_pipeline_options.table_structure_options = TableStructureOptions(
     mode=TableFormerMode.FAST,

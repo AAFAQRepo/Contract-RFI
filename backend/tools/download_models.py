@@ -43,5 +43,24 @@ def download():
     except Exception as e:
         print(f"⚠️  RapidOCR model initialization failed: {e}")
 
+    try:
+        print("🔍 Checking if SuryaOCR is installed for pre-caching...")
+        # Try to import surya internal models to trigger HF downloads
+        from surya.model.detection.model import load_model as load_det_model
+        from surya.model.recognition.model import load_model as load_rec_model
+        from surya.model.ordering.model import load_model as load_order_model
+        
+        print("📥 Downloading Surya detection model...")
+        load_det_model()
+        print("📥 Downloading Surya recognition model...")
+        load_rec_model()
+        print("📥 Downloading Surya ordering model...")
+        load_order_model()
+        print("✅ SuryaOCR models pre-cached.")
+    except ImportError:
+        print("ℹ️  SuryaOCR not found, skipping pre-cache.")
+    except Exception as e:
+        print(f"⚠️  SuryaOCR pre-cache failed: {e}")
+
 if __name__ == "__main__":
     download()

@@ -109,6 +109,33 @@ _fallback_format_options = {
 }
 
 
+def get_ocr_format_options():
+    """Factory to get OCR options based on settings (RapidOCR vs SuryaOCR)."""
+    if settings.OCR_ENGINE.lower() == "suryaocr":
+        try:
+            from docling_surya import SuryaOcrOptions
+            surya_options = PdfPipelineOptions(
+                do_ocr=True,
+                do_table_structure=True,
+                ocr_model="suryaocr",
+                allow_external_plugins=True,
+                generate_page_images=False,
+                generate_picture_images=False,
+                ocr_options=SuryaOcrOptions(lang=["en"]), # Default to english, internal detection handles others
+            )
+            surya_options.table_structure_options = TableStructureOptions(
+                mode=TableFormerMode.FAST,
+            )
+            return {
+                InputFormat.PDF: PdfFormatOption(pipeline_options=surya_options),
+                InputFormat.IMAGE: PdfFormatOption(pipeline_options=surya_options),
+            }
+        except ImportError:
+            print("⚠️  docling-surya not installed; falling back to RapidOCR")
+    
+    return _ocr_format_options
+
+
 @dataclass
 class _ChunkDoc:
     """Minimal document shape used by downstream embedding/storage code."""
@@ -294,13 +321,17 @@ def _build_lc_docs_from_document(document: Any, offset_page_no: int = 0) -> list
 
 
 def _convert_with_ocr(tmp_path: str):
-    """Convert document with OCR path (RapidOCR preferred, Tesseract fallback)."""
-    converter = DocumentConverter(format_options=_ocr_format_options)
+    """Convert document with OCR path (SuryaOCR/RapidOCR preferred, Tesseract fallback)."""
+    format_options = get_ocr_format_options()
+    engine_name = "SuryaOCR" if settings.OCR_ENGINE.lower() == "suryaocr" else "RapidOCR"
+    
+    print(f"🔍 Using OCR Engine: {engine_name}")
+    converter = DocumentConverter(format_options=format_options)
     try:
         result = converter.convert(tmp_path)
         return result, converter
     except Exception as exc:
-        print(f"⚠️  RapidOCR failed ({exc}); falling back to Tesseract OCR")
+        print(f"⚠️  {engine_name} failed ({exc}); falling back to Tesseract OCR")
         converter = DocumentConverter(format_options=_fallback_format_options)
         result = converter.convert(tmp_path)
         return result, converter

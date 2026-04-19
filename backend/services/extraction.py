@@ -51,7 +51,7 @@ _lean_pipeline_options = PdfPipelineOptions(
     do_table_structure=False,
     generate_page_images=False,
     generate_picture_images=False,
-    allow_external_plugins=False,
+    allow_external_plugins=True,
 )
 
 _lean_format_options = {
@@ -64,7 +64,7 @@ _enriched_pipeline_options = PdfPipelineOptions(
     do_table_structure=True,
     generate_page_images=False,
     generate_picture_images=False,
-    allow_external_plugins=False,
+    allow_external_plugins=True,
 )
 _enriched_pipeline_options.table_structure_options = TableStructureOptions(
     mode=TableFormerMode.FAST,
@@ -78,7 +78,7 @@ _enriched_format_options = {
 _ocr_pipeline_options = PdfPipelineOptions(
     do_ocr=True,
     do_table_structure=True,
-    allow_external_plugins=False,
+    allow_external_plugins=True,
     generate_page_images=False,
     generate_picture_images=False,
     ocr_options=RapidOcrOptions(),
@@ -96,7 +96,7 @@ _ocr_format_options = {
 _fallback_pipeline_options = PdfPipelineOptions(
     do_ocr=True,
     ocr_model="tesseractcli",
-    allow_external_plugins=False,
+    allow_external_plugins=True,
     generate_page_images=False,
     generate_picture_images=False,
     # Tesseract uses ISO-639-2 language codes.
@@ -134,6 +134,10 @@ def get_ocr_format_options():
             print("⚠️  docling-surya not installed; falling back to RapidOCR")
     
     return _ocr_format_options
+
+
+print(f"🚀 SuryaOCR Engine selected and validated.") if settings.OCR_ENGINE.lower() == "suryaocr" else None
+print(f"📄 Document extraction service initialized. Active Engine: {settings.OCR_ENGINE}")
 
 
 @dataclass

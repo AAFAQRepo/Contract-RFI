@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # ── OCR Engine ──
     # rapidocr (default) | suryaocr (GPU optimized)
     OCR_ENGINE: str = "rapidocr"
+    
+    # ── OCR Strategy ──
+    # auto (use text layer if exists) | force_ocr (always AI-OCR) | digital_only (skip OCR)
+    OCR_STRATEGY: str = "auto"
 
     # ── GPU Offloading ──
     USE_GPU_SERVER: bool = False

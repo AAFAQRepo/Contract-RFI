@@ -254,10 +254,11 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
         ext = filename.lower().split('.')[-1]
         
         if ext == 'pdf':
-            # Dynamic splitting logic: target ~75 pages per worker, capped at 8 workers
-            # For scanned docs, we target ~15 pages per worker for better OCR parallelism
+            # Dynamic splitting logic for extreme latency reduction
+            # Scanned docs: target ~5 pages per worker (Hyper-Parallel), capped at 16 workers
+            # Digital docs: target ~75 pages per worker, capped at 8 workers
             from services.extraction import is_scanned_pdf_fast_bytes
-            is_scanned = is_scanned_pdf_fast_bytes(file_bytes)
+            is_scanned, has_text_layer = is_scanned_pdf_fast_bytes(file_bytes)
             
             import fitz
             doc = fitz.open(stream=file_bytes, filetype="pdf")
@@ -265,7 +266,7 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
             doc.close()
             
             if is_scanned:
-                num_segments = max(2, min(12, (total_pages + 14) // 15))
+                num_segments = max(2, min(16, (total_pages + 4) // 5))
                 type_msg = "Scanned PDF"
             else:
                 num_segments = max(2, min(8, (total_pages + 74) // 75))

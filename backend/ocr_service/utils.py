@@ -37,6 +37,10 @@ _enriched_format_options = {
     InputFormat.PDF: PdfFormatOption(pipeline_options=_enriched_pipeline_options),
 }
 
+import torch
+_device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"🖥️ [OCR Service] Hardware detection: {_device.upper()}")
+
 def get_ocr_format_options():
     """Factory to get OCR options based on settings."""
     if settings.OCR_ENGINE.lower() == "suryaocr":
@@ -71,12 +75,16 @@ class ConverterRegistry:
     @classmethod
     def get(cls, tier: str) -> DocumentConverter:
         if tier not in cls._instances:
-            print(f"⏳ Warming up OCR Converter [{tier}]...")
+            print(f"⏳ [OCR Service] Warming up [{tier}] converter on {_device.upper()}...")
+            t0 = time.time()
             if tier == "lean":
                 cls._instances[tier] = DocumentConverter(format_options=_lean_format_options)
             elif tier == "enriched":
                 cls._instances[tier] = DocumentConverter(format_options=_enriched_format_options)
             elif tier == "ocr":
+                # Ensure torch is using the right device globally if possible
                 cls._instances[tier] = DocumentConverter(format_options=get_ocr_format_options())
-            print(f"✅ OCR Converter [{tier}] warmed.")
+            
+            t_warm = time.time() - t0
+            print(f"✅ [OCR Service] Converter [{tier}] warmed in {t_warm:.1f}s.")
         return cls._instances[tier]

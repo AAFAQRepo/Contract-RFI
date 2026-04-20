@@ -48,7 +48,7 @@ def remote_convert(file_bytes: bytes, filename: str, tier: str = "ocr"):
     """
     Calls the dedicated OCR service to perform conversion.
     """
-    print(f"📡 Dispatching to Remote OCR Service (tier={tier})...")
+    print(f"📡 Dispatching to Remote OCR Service: {filename} (tier={tier})...")
     files = {"file": (filename, file_bytes)}
     data = {"tier": tier}
     
@@ -62,7 +62,34 @@ def remote_convert(file_bytes: bytes, filename: str, tier: str = "ocr"):
             doc = DoclingDocument.model_validate(res_json["document"])
             return doc, res_json["markdown"], res_json["page_count"]
     except Exception as e:
-        print(f"❌ Remote OCR failed: {e}")
+        print(f"❌ Remote OCR failed for {filename}: {e}")
+        raise
+
+def remote_convert_batch(segments: list[tuple[bytes, str]], tier: str = "ocr"):
+    """
+    Calls the dedicated OCR service to perform BATCH conversion of multiple segments.
+    Leverages A10 CUDA batching for massive speedup.
+    """
+    print(f"📡 Dispatching BATCH of {len(segments)} segments to Remote OCR Service...")
+    
+    # Format for httpx: list of tuples (name, (filename, bytes))
+    files = [("files", (filename, file_bytes)) for file_bytes, filename in segments]
+    data = {"tier": tier}
+    
+    try:
+        with httpx.Client(timeout=600.0) as client:
+            response = client.post(f"{OCR_SERVICE_URL}/convert_batch", files=files, data=data)
+            response.raise_for_status()
+            res_json = response.json()
+            
+            results = []
+            for item in res_json["results"]:
+                doc = DoclingDocument.model_validate(item["document"])
+                results.append((doc, item["markdown"], item["page_count"]))
+            
+            return results, res_json["latency"]
+    except Exception as e:
+        print(f"❌ Remote BATCH OCR failed: {e}")
         raise
 
 # ── Global Cached Tokenizer ──────────────────────────────────────────────────

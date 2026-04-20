@@ -6,6 +6,7 @@ import os
 import time
 import threading
 import traceback
+import torch
 from ocr_service.utils import ConverterRegistry
 
 app = FastAPI(title="Contract RFI OCR Service")

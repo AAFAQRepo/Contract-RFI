@@ -184,6 +184,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    environment:
+      - OCR_ENGINE=suryaocr
+      - RECOGNITION_BATCH_SIZE=32
+      - DETECTION_BATCH_SIZE=16
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     deploy:
       resources:
         reservations:

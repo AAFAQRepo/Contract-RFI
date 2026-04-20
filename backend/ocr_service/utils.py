@@ -53,8 +53,8 @@ def get_ocr_format_options():
             allow_external_plugins=True,
             ocr_options=SuryaOcrOptions(
                 lang=["en"],
-                recognition_batch_size=32, # 🚀 A10 Performance Boost
-                detection_batch_size=16,   # 🚀 A10 Performance Boost
+                # Note: Batch sizes are set via ENV variables:
+                # RECOGNITION_BATCH_SIZE and DETECTION_BATCH_SIZE
             ),
         )
         surya_options.table_structure_options = TableStructureOptions(mode=TableFormerMode.FAST)

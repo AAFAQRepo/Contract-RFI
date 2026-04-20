@@ -57,6 +57,7 @@ def get_ocr_format_options():
                 # RECOGNITION_BATCH_SIZE and DETECTION_BATCH_SIZE
             ),
         )
+        surya_options.accelerator_options.num_threads = 8 # 🚀 Parallel Rendering
         surya_options.table_structure_options = TableStructureOptions(mode=TableFormerMode.FAST)
         return {
             InputFormat.PDF: PdfFormatOption(pipeline_options=surya_options),
@@ -87,11 +88,8 @@ class ConverterRegistry:
             elif tier == "enriched":
                 cls._instances[tier] = DocumentConverter(format_options=_enriched_format_options)
             elif tier == "ocr":
-                # Increase num_threads to 8 to handle parallel image rendering for multi-page PDFs
-                cls._instances[tier] = DocumentConverter(
-                    format_options=get_ocr_format_options(),
-                    num_threads=8
-                )
+                # The OCR tier uses the high-performance format options (A10 Optimized)
+                cls._instances[tier] = DocumentConverter(format_options=get_ocr_format_options())
             
             t_warm = time.time() - t0
             print(f"✅ [OCR Service] Converter [{tier}] warmed in {t_warm:.1f}s.")

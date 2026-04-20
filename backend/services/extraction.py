@@ -7,13 +7,13 @@ Single entry point:
 
 Handles all formats (PDF, DOCX, PPTX, images) with:
   - Three-tier pipeline: Lean → Enriched (FAST tables) → OCR
-  - RapidOCR for scanned / image-based documents
+  - SuryaOCR (default) for scanned / image-based documents
   - HybridChunker for document-aware chunking
 
 Pipeline tiers:
   Tier 1 "Lean"     — No OCR, no table structure.  Fastest.
   Tier 2 "Enriched" — No OCR, FAST table structure. For table-heavy docs.
-  Tier 3 "OCR"      — RapidOCR (fallback: Tesseract). For scanned docs.
+  Tier 3 "OCR"      — SuryaOCR (fallback: RapidOCR → Tesseract). For scanned docs.
 """
 
 import os
@@ -325,7 +325,7 @@ def _build_lc_docs_from_document(document: Any, offset_page_no: int = 0) -> list
 
 
 def _convert_with_ocr(tmp_path: str):
-    """Convert document with OCR path (SuryaOCR/RapidOCR preferred, Tesseract fallback)."""
+    """Convert document with OCR path (SuryaOCR preferred, RapidOCR fallback, Tesseract last resort)."""
     format_options = get_ocr_format_options()
     engine_name = "SuryaOCR" if settings.OCR_ENGINE.lower() == "suryaocr" else "RapidOCR"
     
@@ -335,7 +335,19 @@ def _convert_with_ocr(tmp_path: str):
         result = converter.convert(tmp_path)
         return result, converter
     except Exception as exc:
-        print(f"⚠️  {engine_name} failed ({exc}); falling back to Tesseract OCR")
+        print(f"⚠️  {engine_name} failed ({exc})")
+        
+        # If Surya failed, try RapidOCR before falling back to Tesseract
+        if settings.OCR_ENGINE.lower() == "suryaocr":
+            print("   Falling back to RapidOCR")
+            converter = DocumentConverter(format_options=_ocr_format_options)
+            try:
+                result = converter.convert(tmp_path)
+                return result, converter
+            except Exception as exc2:
+                print(f"⚠️  RapidOCR also failed ({exc2})")
+        
+        print("   Falling back to Tesseract OCR")
         converter = DocumentConverter(format_options=_fallback_format_options)
         result = converter.convert(tmp_path)
         return result, converter

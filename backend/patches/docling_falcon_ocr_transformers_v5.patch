@@ -1,0 +1,28 @@
+--- a/docling/models/inference_engines/vlm/transformers_engine.py
++++ b/docling/models/inference_engines/vlm/transformers_engine.py
+@@ -199,7 +199,9 @@ class TransformersVlmEngine(BaseVlmEngine):
+             _attn_implementation=(
+                 "flash_attention_2"
+                 if self.device.startswith("cuda")  # type: ignore[union-attr]
+                 and self.accelerator_options.cuda_use_flash_attention2
+-                else "sdpa"
++                else "eager" if "falcon" in repo_id.lower() else "sdpa"
+             ),
+             trust_remote_code=self.options.trust_remote_code,
+             revision=revision,
+@@ -229,9 +231,13 @@ class TransformersVlmEngine(BaseVlmEngine):
+                 )
+ 
+         # Load generation config
+-        self.generation_config = GenerationConfig.from_pretrained(
+-            artifacts_path, revision=revision
+-        )
++        try:
++            self.generation_config = GenerationConfig.from_pretrained(
++                artifacts_path, revision=revision
++            )
++        except OSError:
++            _log.warning(f"No generation_config.json found for {repo_id}, using default generation config")
++            self.generation_config = GenerationConfig()
+ 
+         _log.info(f"Loaded model {repo_id} (revision: {revision})")

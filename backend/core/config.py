@@ -48,8 +48,8 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
 
     # ── OCR Engine ──
-    # rapidocr (default) | suryaocr (GPU optimized)
-    OCR_ENGINE: str = "rapidocr"
+    # suryaocr (default, GPU optimized) | rapidocr (fast fallback)
+    OCR_ENGINE: str = "suryaocr"
 
     # ── GPU Offloading ──
     USE_GPU_SERVER: bool = False

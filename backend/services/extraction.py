@@ -110,8 +110,37 @@ _fallback_format_options = {
 
 
 def get_ocr_format_options():
-    """Factory to get OCR options based on settings (RapidOCR vs SuryaOCR)."""
-    if settings.OCR_ENGINE.lower() == "suryaocr":
+    """Factory to get OCR options based on settings (RapidOCR vs SuryaOCR vs FalconOCR)."""
+    engine = settings.OCR_ENGINE.lower()
+    
+    if engine == "falconocr":
+        try:
+            from docling.pipeline.vlm_pipeline import VlmPipeline
+            from docling.datamodel.pipeline_options import VlmConvertOptions, VlmPipelineOptions
+            
+            # Using the native falcon_ocr preset added in Docling 2.85.0
+            vlm_options = VlmConvertOptions.from_preset("falcon_ocr")
+            # We enable quantization and bfloat16 to optimize VRAM usage on the GPU server
+            pipeline_options = VlmPipelineOptions(
+                vlm_options=vlm_options,
+                allow_external_plugins=True
+            )
+            
+            return {
+                InputFormat.PDF: PdfFormatOption(
+                    pipeline_cls=VlmPipeline, 
+                    pipeline_options=pipeline_options
+                ),
+                InputFormat.IMAGE: PdfFormatOption(
+                    pipeline_cls=VlmPipeline, 
+                    pipeline_options=pipeline_options
+                ),
+            }
+        except ImportError as e:
+            print(f"⚠️  VLM Pipeline components missing ({e}); falling back to RapidOCR")
+            engine = "rapidocr"
+
+    if engine == "suryaocr":
         try:
             from docling_surya import SuryaOcrOptions
             surya_options = PdfPipelineOptions(
@@ -121,7 +150,7 @@ def get_ocr_format_options():
                 allow_external_plugins=True,
                 generate_page_images=False,
                 generate_picture_images=False,
-                ocr_options=SuryaOcrOptions(lang=["en"]), # Default to english, internal detection handles others
+                ocr_options=SuryaOcrOptions(lang=["en"]),
             )
             surya_options.table_structure_options = TableStructureOptions(
                 mode=TableFormerMode.FAST,
@@ -325,9 +354,16 @@ def _build_lc_docs_from_document(document: Any, offset_page_no: int = 0) -> list
 
 
 def _convert_with_ocr(tmp_path: str):
-    """Convert document with OCR path (SuryaOCR preferred, RapidOCR fallback, Tesseract last resort)."""
+
+    """Convert document with OCR path (SuryaOCR preferred, RapidOCR fallback, Tesseract last """
     format_options = get_ocr_format_options()
-    engine_name = "SuryaOCR" if settings.OCR_ENGINE.lower() == "suryaocr" else "RapidOCR"
+    
+    engine_map = {
+        "falconocr": "Falcon-OCR (VLM)",
+        "suryaocr": "SuryaOCR",
+        "rapidocr": "RapidOCR"
+    }
+    engine_name = engine_map.get(settings.OCR_ENGINE.lower(), "RapidOCR")
     
     print(f"🔍 Using OCR Engine: {engine_name}")
     converter = DocumentConverter(format_options=format_options)

@@ -68,7 +68,7 @@ services:
     environment:
       - PORT=80
     volumes:
-      - model_cache:/data
+      - /home/ubuntu/.cache/huggingface:/data
     deploy:
       resources:
         reservations:
@@ -108,7 +108,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - model_cache:/root/.cache
+      - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health >/dev/null || exit 1"]
       interval: 20s
@@ -156,7 +156,7 @@ services:
       # Manage Docling's memory better to avoid fragmentation
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     volumes:
-      - model_cache:/root/.cache
+      - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface
     deploy:
       resources:
         reservations:

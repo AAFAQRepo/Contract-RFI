@@ -102,7 +102,7 @@ services:
       tei-embeddings:
         condition: service_healthy
       ocr-service:
-        condition: service_started
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -153,7 +153,7 @@ services:
       tei-embeddings:
         condition: service_healthy
       ocr-service:
-        condition: service_started
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -178,6 +178,12 @@ services:
     volumes:
       - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface
       - /home/ubuntu/.cache/docling:/root/.cache/docling
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     deploy:
       resources:
         reservations:

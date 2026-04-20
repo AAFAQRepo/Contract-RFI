@@ -265,7 +265,10 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
             doc.close()
             
             if is_scanned:
-                num_segments = max(2, min(12, (total_pages + 14) // 15))
+                # Hyper-Parallel: split into 1-2 pages per worker for scanned PDFs (max 16 workers)
+                num_segments = max(2, min(16, (total_pages + 1) // 2)) 
+                if total_pages <= 16:
+                    num_segments = total_pages
                 type_msg = "Scanned PDF"
             else:
                 num_segments = max(2, min(8, (total_pages + 74) // 75))

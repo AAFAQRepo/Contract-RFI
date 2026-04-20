@@ -9,6 +9,7 @@ from docling.datamodel.pipeline_options import (
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from core.config import get_settings
 import logging
+import time
 
 settings = get_settings()
 

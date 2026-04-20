@@ -101,13 +101,10 @@ services:
         condition: service_healthy
       tei-embeddings:
         condition: service_healthy
-      ocr-service:
-        condition: service_healthy
     env_file:
       - .env
     environment:
       - EMBEDDING_SERVICE_URL=http://tei-embeddings:80
-      - OCR_SERVICE_URL=http://ocr-service:8001
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -152,44 +149,14 @@ services:
         condition: service_healthy
       tei-embeddings:
         condition: service_healthy
-      ocr-service:
-        condition: service_healthy
     env_file:
       - .env
     environment:
       - EMBEDDING_SERVICE_URL=http://tei-embeddings:80
-      - OCR_SERVICE_URL=http://ocr-service:8001
+      # Manage Docling's memory better to avoid fragmentation
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     volumes:
       - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface
-    # CPU-only worker (lightweight)
-
-  ocr-service:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: contract_rfi_ocr
-    restart: always
-    command: python -m ocr_service.main
-    ports:
-      - "127.0.0.1:8001:8001"
-    env_file:
-      - .env
-    volumes:
-      - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface
-      - /home/ubuntu/.cache/docling:/root/.cache/docling
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    environment:
-      - OCR_ENGINE=suryaocr
-      - RECOGNITION_BATCH_SIZE=128
-      - DETECTOR_BATCH_SIZE=16
-      - COMPILE_ALL=true
-      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     deploy:
       resources:
         reservations:

@@ -205,56 +205,21 @@ def finalize_document_ingestion(results, document_id: str, user_id: str, filenam
         session.close()
 
 
-@celery_app.task(name="workers.extract_batch_task", max_retries=3)
-def extract_batch_task(segments: list[tuple[bytes, int]], filename: str) -> list[tuple[list[dict], list[list[float]], str, int]]:
-    """
-    Experimental high-speed batch task for Scanned PDFs.
-    Sends all segments to the OCR service in ONE call to leverage A10 CUDA batching.
-    Returns a list of (serialized_docs, embeddings, full_text, page_count).
-    """
-    from services.extraction import remote_convert_batch, _build_lc_docs_from_document
-    from services.embedding import embed_passages
-
-    # Prepare files for the batch call
-    # segments is list of (bytes, page_offset)
-    batch_input = []
-    for i, (chunk_bytes, offset) in enumerate(segments):
-        part_name = f"part_{i}_{filename}"
-        batch_input.append((chunk_bytes, part_name))
-
-    results, batch_latency = remote_convert_batch(batch_input)
-    print(f"🚀 [Batch OCR] Completed {len(segments)} segments in {batch_latency:.2f}s")
-
-    final_output = []
-    for i, (doc, markdown, page_count) in enumerate(results):
-        offset = segments[i][1]
-        
-        # Build LangChain docs (chunking)
-        lc_docs = _build_lc_docs_from_document(doc, offset_page_no=offset)
-        
-        # Embeddings
-        texts = [d.page_content for d in lc_docs]
-        embeddings = embed_passages(texts)
-        
-        # Serialize for Celery
-        serialized_docs = [{"page_content": d.page_content, "metadata": d.metadata} for d in lc_docs]
-        final_output.append((serialized_docs, embeddings, markdown, page_count))
-
-    return final_output
-
-
 @celery_app.task(name="workers.process_document", bind=True, max_retries=3)
 def process_document(self, document_id: str, user_id: str, object_name: str, filename: str):
     """
     Coordinator task for document ingestion.
-    Now supports Batch Parallelism for Scanned PDFs on A10 GPUs.
+    Implementation:
+      1. Download file from MinIO.
+      2. If PDF, split into two segments for parallel processing.
+      3. Dispatch workers via Chord and merge in finalized task.
     """
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from datetime import datetime
     from models.models import Document
     from services.storage import download_document
-    from services.extraction import split_pdf_into_chunks, is_scanned_pdf_fast_bytes
+    from services.extraction import split_pdf_into_chunks
 
     engine = create_engine(settings.DATABASE_URL_SYNC)
     Session = sessionmaker(bind=engine)
@@ -274,66 +239,66 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
             sess.commit()
 
     try:
+        # Pre-check existence
         doc = session.get(Document, document_id)
         if not doc:
             raise self.retry(countdown=2)
 
-        print(f"⏳ Starting ingestion for {document_id}")
+        print(f"⏳ Starting parallel ingestion for {document_id}")
         _update_status(session, "processing", step="Downloading", progress=10)
 
+        # 1. Download
         file_bytes = download_document(object_name)
+
+        # 2. Coordinate Extraction
         ext = filename.lower().split('.')[-1]
         
         if ext == 'pdf':
+            # Dynamic splitting logic: target ~75 pages per worker, capped at 8 workers
+            # For scanned docs, we target ~15 pages per worker for better OCR parallelism
+            from services.extraction import is_scanned_pdf_fast_bytes
             is_scanned = is_scanned_pdf_fast_bytes(file_bytes)
             
             import fitz
-            pdf_doc = fitz.open(stream=file_bytes, filetype="pdf")
-            total_pages = len(pdf_doc)
-            pdf_doc.close()
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            total_pages = len(doc)
+            doc.close()
             
             if is_scanned:
-                # 🚀 BATCH MODE for Scanned PDFs
-                # For small docs (< 50 pages), we send the whole file as one segment.
-                # This is much faster on the A10 than splitting.
-                if total_pages <= 50:
-                    print(f"🚀 Scanned PDF detected ({total_pages} pages). Sending original file for peak A10 speed.")
-                    segments = [(file_bytes, 0)]
-                else:
-                    print(f"🚀 Large Scanned PDF detected ({total_pages} pages). Splitting into 20-page segments.")
-                    num_segments = max(1, (total_pages + 19) // 20)
-                    segments = split_pdf_into_chunks(file_bytes, n=num_segments)
-                
-                _update_status(session, "processing", step="Running Fast A10 OCR", progress=30)
-                
-                batch_res = extract_batch_task(segments, filename)
-                finalize_document_ingestion(batch_res, document_id, user_id, filename)
-                
-                return {"status": "completed_batch", "parts": len(segments)}
+                num_segments = max(2, min(12, (total_pages + 14) // 15))
+                type_msg = "Scanned PDF"
             else:
-                # 🔀 CHORD MODE for Digital PDFs
-                # We still split digital PDFs because they are handled by CPUs across workers
                 num_segments = max(2, min(8, (total_pages + 74) // 75))
-                print(f"🔀 Digital PDF detected ({total_pages} pages): splitting into {num_segments} workers")
-                _update_status(session, "processing", step=f"Dispatching {num_segments} workers", progress=20)
+                type_msg = "Digital PDF"
                 
-                segments = split_pdf_into_chunks(file_bytes, n=num_segments)
-                callback = finalize_document_ingestion.s(document_id=document_id, user_id=user_id, filename=filename)
-                header = [extract_chunk_task.s(chunk_bytes, filename, offset) for chunk_bytes, offset in segments]
-                chord(header)(callback)
-                
-                return {"status": "dispatched", "parts": len(segments)}
+            print(f"🔀 {type_msg} detected ({total_pages} pages): splitting into {num_segments} parallel segments")
+            _update_status(session, "processing", step=f"Splitting {type_msg} into {num_segments} parts", progress=20)
+            segments = split_pdf_into_chunks(file_bytes, n=num_segments)
         else:
-            # Non-PDF
+            # Single segment for non-PDFs
             segments = [(file_bytes, 0)]
-            header = [extract_chunk_task.s(file_bytes, filename, 0)]
-            callback = finalize_document_ingestion.s(document_id=document_id, user_id=user_id, filename=filename)
-            chord(header)(callback)
-            return {"status": "dispatched", "parts": 1}
+
+        # 3. Create Chord: Map (Extract) -> Reduce (Finalize)
+        _update_status(session, "processing", step=f"Dispatching {len(segments)} workers", progress=30)
+        
+        callback = finalize_document_ingestion.s(
+            document_id=document_id,
+            user_id=user_id,
+            filename=filename
+        )
+        
+        header = [
+            extract_chunk_task.s(chunk_bytes, filename, offset)
+            for chunk_bytes, offset in segments
+        ]
+        
+        chord(header)(callback)
+        
+        print(f"📡 Coordination complete for {document_id}. Workers dispatched.")
+        return {"status": "dispatched", "parts": len(segments)}
 
     except Exception as exc:
-        import traceback
-        traceback.print_exc()
+        print(f"❌ Coordination failed for {document_id}: {exc}")
         _update_status(session, "error", error=str(exc))
         session.commit()
         raise self.retry(exc=exc, countdown=2 ** self.request.retries)

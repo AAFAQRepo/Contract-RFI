@@ -82,7 +82,9 @@ def convert_batch(
         converter = ConverterRegistry.get(tier)
         
         # convert_all is internal-batching optimized
+        t_conv_start = time.time()
         results = list(converter.convert_all(tmp_paths))
+        t_conv_end = time.time()
         
         output = []
         for res in results:
@@ -93,11 +95,19 @@ def convert_batch(
             })
 
         latency = time.time() - t_start
-        print(f"✅ [OCR Service] Batch of {len(files)} finished in {latency:.2f}s")
-        return {"results": output, "latency": latency}
+        conv_latency = t_conv_end - t_conv_start
+        print(f"✅ [OCR Service] Batch of {len(files)} finished in {latency:.2f}s (Conv: {conv_latency:.2f}s)")
+        
+        # Proactive VRAM cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
+        return {"results": output, "latency": latency, "core_conversion_latency": conv_latency}
 
     except Exception as e:
         traceback.print_exc()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         for p in tmp_paths:

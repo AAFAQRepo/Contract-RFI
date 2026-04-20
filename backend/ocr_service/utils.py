@@ -51,7 +51,11 @@ def get_ocr_format_options():
             do_table_structure=True,
             ocr_model="suryaocr",
             allow_external_plugins=True,
-            ocr_options=SuryaOcrOptions(lang=["en"]),
+            ocr_options=SuryaOcrOptions(
+                lang=["en"],
+                recognition_batch_size=32, # 🚀 A10 Performance Boost
+                detection_batch_size=16,   # 🚀 A10 Performance Boost
+            ),
         )
         surya_options.table_structure_options = TableStructureOptions(mode=TableFormerMode.FAST)
         return {

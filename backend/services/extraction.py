@@ -38,6 +38,7 @@ from docling.chunking import HybridChunker
 from langchain_docling import DoclingLoader
 from langchain_docling.loader import ExportType
 import logging
+from transformers import AutoTokenizer
 from core.config import get_settings
 
 # ── Silence Junk Logs ────────────────────────────────────────────────────────
@@ -57,19 +58,25 @@ _tokenizer = None
 def get_tokenizer():
     global _tokenizer
     if _tokenizer is None:
+        # Try local first to avoid 'junk' logging/network checks
         try:
-            _tokenizer = AutoTokenizer.from_pretrained(
-                settings.EMBEDDING_MODEL, 
-                trust_remote_code=True,
-                local_files_only=False # Allow first download, then it caches
-            )
-        except Exception:
-            # Fallback if offline
             _tokenizer = AutoTokenizer.from_pretrained(
                 settings.EMBEDDING_MODEL, 
                 trust_remote_code=True, 
                 local_files_only=True
             )
+        except Exception:
+            try:
+                # If not local, allow one download
+                print(f"⏳ Downloading tokenizer {settings.EMBEDDING_MODEL}...")
+                _tokenizer = AutoTokenizer.from_pretrained(
+                    settings.EMBEDDING_MODEL, 
+                    trust_remote_code=True,
+                    local_files_only=False
+                )
+            except Exception as e:
+                print(f"❌ Failed to load tokenizer: {e}")
+                raise
     return _tokenizer
 
 # ── Pipeline options (configured once) ────────────────────────────────
@@ -206,6 +213,18 @@ class ConverterRegistry:
     @classmethod
     def get(cls, tier: str) -> DocumentConverter:
         if tier not in cls._instances:
+            # ── Download Stampede Protection ──
+            # If multiple workers start OCR at once and models aren't cached, 
+            # they all try to download 1.3GB to the same folder.
+            if tier == "ocr":
+                import random
+                jitter = random.uniform(0, 10)
+                print(f"⏳ Jittering {tier} initialization ({jitter:.1f}s) to prevent download race...")
+                time.sleep(jitter)
+                # Re-check in case another worker already warmed it up while we slept
+                if tier in cls._instances:
+                    return cls._instances[tier]
+
             print(f"⏳ Warming up DocumentConverter [{tier}]...")
             if tier == "lean":
                 cls._instances[tier] = DocumentConverter(format_options=_lean_format_options)
@@ -219,10 +238,6 @@ class ConverterRegistry:
         return cls._instances[tier]
 
 
-print(f"🚀 SuryaOCR Engine selected and validated.") if settings.OCR_ENGINE.lower() == "suryaocr" else None
-
-
-print(f"🚀 SuryaOCR Engine selected and validated.") if settings.OCR_ENGINE.lower() == "suryaocr" else None
 print(f"📄 Document extraction service initialized. Active Engine: {settings.OCR_ENGINE}")
 
 

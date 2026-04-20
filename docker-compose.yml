@@ -186,8 +186,8 @@ services:
       start_period: 30s
     environment:
       - OCR_ENGINE=suryaocr
-      - RECOGNITION_BATCH_SIZE=256
-      - DETECTOR_BATCH_SIZE=32
+      - RECOGNITION_BATCH_SIZE=128
+      - DETECTOR_BATCH_SIZE=16
       - COMPILE_ALL=true
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     deploy:

@@ -294,20 +294,25 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
             
             if is_scanned:
                 # 🚀 BATCH MODE for Scanned PDFs
-                print(f"🚀 Scanned PDF detected ({total_pages} pages). Using BATCH Parallelism.")
-                # We split into manageable chunks for the OCR service (e.g., 5 pages per chunk)
-                num_segments = max(1, (total_pages + 4) // 5)
-                segments = split_pdf_into_chunks(file_bytes, n=num_segments)
+                # For small docs (< 50 pages), we send the whole file as one segment.
+                # This is much faster on the A10 than splitting.
+                if total_pages <= 50:
+                    print(f"🚀 Scanned PDF detected ({total_pages} pages). Sending original file for peak A10 speed.")
+                    segments = [(file_bytes, 0)]
+                else:
+                    print(f"🚀 Large Scanned PDF detected ({total_pages} pages). Splitting into 20-page segments.")
+                    num_segments = max(1, (total_pages + 19) // 20)
+                    segments = split_pdf_into_chunks(file_bytes, n=num_segments)
                 
-                _update_status(session, "processing", step="Running Batch OCR Ingestion", progress=30)
+                _update_status(session, "processing", step="Running Fast A10 OCR", progress=30)
                 
-                # We use a shortcut: instead of a Chord, we call the batch task and then pass to finalizer
                 batch_res = extract_batch_task(segments, filename)
                 finalize_document_ingestion(batch_res, document_id, user_id, filename)
                 
                 return {"status": "completed_batch", "parts": len(segments)}
             else:
                 # 🔀 CHORD MODE for Digital PDFs
+                # We still split digital PDFs because they are handled by CPUs across workers
                 num_segments = max(2, min(8, (total_pages + 74) // 75))
                 print(f"🔀 Digital PDF detected ({total_pages} pages): splitting into {num_segments} workers")
                 _update_status(session, "processing", step=f"Dispatching {num_segments} workers", progress=20)

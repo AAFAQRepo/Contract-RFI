@@ -87,8 +87,11 @@ class ConverterRegistry:
             elif tier == "enriched":
                 cls._instances[tier] = DocumentConverter(format_options=_enriched_format_options)
             elif tier == "ocr":
-                # Ensure torch is using the right device globally if possible
-                cls._instances[tier] = DocumentConverter(format_options=get_ocr_format_options())
+                # Increase num_threads to 8 to handle parallel image rendering for multi-page PDFs
+                cls._instances[tier] = DocumentConverter(
+                    format_options=get_ocr_format_options(),
+                    num_threads=8
+                )
             
             t_warm = time.time() - t0
             print(f"✅ [OCR Service] Converter [{tier}] warmed in {t_warm:.1f}s.")

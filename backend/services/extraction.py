@@ -19,38 +19,51 @@ Pipeline tiers:
 import os
 import time
 import tempfile
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import fitz  # PyMuPDF
-
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import (
-    PdfPipelineOptions,
-    RapidOcrOptions,
-    TableFormerMode,
-    TableStructureOptions,
-    TesseractCliOcrOptions,
-)
-from docling.document_converter import DocumentConverter, PdfFormatOption
+import httpx
 from docling.chunking import HybridChunker
-from langchain_docling import DoclingLoader
-from langchain_docling.loader import ExportType
-import logging
+from docling_core.types.doc.document import DoclingDocument
 from transformers import AutoTokenizer
 from core.config import get_settings
+
+settings = get_settings()
 
 # ── Silence Junk Logs ────────────────────────────────────────────────────────
 logging.getLogger("docling").setLevel(logging.WARNING)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
-# Suppress Tqdm progress bars
-import os
 os.environ["TQDM_DISABLE"] = "1"
 
-settings = get_settings()
+# ── Remote OCR Service Client ────────────────────────────────────────────────
+
+OCR_SERVICE_URL = os.getenv("OCR_SERVICE_URL", "http://ocr-service:8001")
+
+def remote_convert(file_bytes: bytes, filename: str, tier: str = "ocr"):
+    """
+    Calls the dedicated OCR service to perform conversion.
+    """
+    print(f"📡 Dispatching to Remote OCR Service (tier={tier})...")
+    files = {"file": (filename, file_bytes)}
+    data = {"tier": tier}
+    
+    try:
+        with httpx.Client(timeout=300.0) as client:
+            response = client.post(f"{OCR_SERVICE_URL}/convert", files=files, data=data)
+            response.raise_for_status()
+            res_json = response.json()
+            
+            # Reconstruct DoclingDocument from dict
+            doc = DoclingDocument.model_validate(res_json["document"])
+            return doc, res_json["markdown"], res_json["page_count"]
+    except Exception as e:
+        print(f"❌ Remote OCR failed: {e}")
+        raise
 
 # ── Global Cached Tokenizer ──────────────────────────────────────────────────
 _tokenizer = None
@@ -79,167 +92,7 @@ def get_tokenizer():
                 raise
     return _tokenizer
 
-# ── Pipeline options (configured once) ────────────────────────────────
-
-# Tier 1 — Lean: no OCR, no table structure.  Maximum speed.
-_lean_pipeline_options = PdfPipelineOptions(
-    do_ocr=False,
-    do_table_structure=False,
-    generate_page_images=False,
-    generate_picture_images=False,
-    allow_external_plugins=True,
-)
-
-_lean_format_options = {
-    InputFormat.PDF: PdfFormatOption(pipeline_options=_lean_pipeline_options),
-}
-
-# Tier 2 — Enriched: no OCR, but FAST table structure for table-heavy docs.
-_enriched_pipeline_options = PdfPipelineOptions(
-    do_ocr=False,
-    do_table_structure=True,
-    generate_page_images=False,
-    generate_picture_images=False,
-    allow_external_plugins=True,
-)
-_enriched_pipeline_options.table_structure_options = TableStructureOptions(
-    mode=TableFormerMode.FAST,
-)
-
-_enriched_format_options = {
-    InputFormat.PDF: PdfFormatOption(pipeline_options=_enriched_pipeline_options),
-}
-
-# Tier 3a — OCR primary (RapidOCR - Fast & Light)
-_ocr_pipeline_options = PdfPipelineOptions(
-    do_ocr=True,
-    do_table_structure=True,
-    allow_external_plugins=True,
-    generate_page_images=False,
-    generate_picture_images=False,
-    ocr_options=RapidOcrOptions(),
-)
-_ocr_pipeline_options.table_structure_options = TableStructureOptions(
-    mode=TableFormerMode.FAST,
-)
-
-_ocr_format_options = {
-    InputFormat.PDF: PdfFormatOption(pipeline_options=_ocr_pipeline_options),
-    InputFormat.IMAGE: PdfFormatOption(pipeline_options=_ocr_pipeline_options),
-}
-
-# Tier 3b — OCR fallback (Tesseract CLI)
-_fallback_pipeline_options = PdfPipelineOptions(
-    do_ocr=True,
-    ocr_model="tesseractcli",
-    allow_external_plugins=True,
-    generate_page_images=False,
-    generate_picture_images=False,
-    # Tesseract uses ISO-639-2 language codes.
-    ocr_options=TesseractCliOcrOptions(lang=["eng", "ara", "hin"]),
-)
-
-_fallback_format_options = {
-    InputFormat.PDF: PdfFormatOption(pipeline_options=_fallback_pipeline_options),
-    InputFormat.IMAGE: PdfFormatOption(pipeline_options=_fallback_pipeline_options),
-}
-
-
-def get_ocr_format_options():
-    """Factory to get OCR options based on settings (RapidOCR vs SuryaOCR vs FalconOCR)."""
-    engine = settings.OCR_ENGINE.lower()
-    
-    if engine == "falconocr":
-        try:
-            from docling.pipeline.vlm_pipeline import VlmPipeline
-            from docling.datamodel.pipeline_options import VlmConvertOptions, VlmPipelineOptions
-            
-            # Using the native falcon_ocr preset added in Docling 2.85.0
-            vlm_options = VlmConvertOptions.from_preset("falcon_ocr")
-            # We enable quantization and bfloat16 to optimize VRAM usage on the GPU server
-            pipeline_options = VlmPipelineOptions(
-                vlm_options=vlm_options,
-                allow_external_plugins=True
-            )
-            
-            return {
-                InputFormat.PDF: PdfFormatOption(
-                    pipeline_cls=VlmPipeline, 
-                    pipeline_options=pipeline_options
-                ),
-                InputFormat.IMAGE: PdfFormatOption(
-                    pipeline_cls=VlmPipeline, 
-                    pipeline_options=pipeline_options
-                ),
-            }
-        except ImportError as e:
-            print(f"⚠️  VLM Pipeline components missing ({e}); falling back to RapidOCR")
-            engine = "rapidocr"
-
-    if engine == "suryaocr":
-        try:
-            from docling_surya import SuryaOcrOptions
-            surya_options = PdfPipelineOptions(
-                do_ocr=True,
-                do_table_structure=True,
-                ocr_model="suryaocr",
-                allow_external_plugins=True,
-                generate_page_images=False,
-                generate_picture_images=False,
-                ocr_options=SuryaOcrOptions(lang=["en"]),
-            )
-            surya_options.table_structure_options = TableStructureOptions(
-                mode=TableFormerMode.FAST,
-            )
-            return {
-                InputFormat.PDF: PdfFormatOption(pipeline_options=surya_options),
-                InputFormat.IMAGE: PdfFormatOption(pipeline_options=surya_options),
-            }
-        except ImportError:
-            print("⚠️  docling-surya not installed; falling back to RapidOCR")
-    
-    return _ocr_format_options
-
-
-# ── Document Converter Singleton Registry ──────────────────────────────────────
-
-class ConverterRegistry:
-    """
-    Caches initialized DocumentConverter instances per tier.
-    Eliminates the ~10s overhead of loading plugins/weights on every task.
-    """
-    _instances = {}
-
-    @classmethod
-    def get(cls, tier: str) -> DocumentConverter:
-        if tier not in cls._instances:
-            # ── Download Stampede Protection ──
-            # If multiple workers start OCR at once and models aren't cached, 
-            # they all try to download 1.3GB to the same folder.
-            if tier == "ocr":
-                import random
-                jitter = random.uniform(0, 10)
-                print(f"⏳ Jittering {tier} initialization ({jitter:.1f}s) to prevent download race...")
-                time.sleep(jitter)
-                # Re-check in case another worker already warmed it up while we slept
-                if tier in cls._instances:
-                    return cls._instances[tier]
-
-            print(f"⏳ Warming up DocumentConverter [{tier}]...")
-            if tier == "lean":
-                cls._instances[tier] = DocumentConverter(format_options=_lean_format_options)
-            elif tier == "enriched":
-                cls._instances[tier] = DocumentConverter(format_options=_enriched_format_options)
-            elif tier == "ocr":
-                cls._instances[tier] = DocumentConverter(format_options=get_ocr_format_options())
-            elif tier == "fallback":
-                cls._instances[tier] = DocumentConverter(format_options=_fallback_format_options)
-            print(f"✅ DocumentConverter [{tier}] warmed.")
-        return cls._instances[tier]
-
-
-print(f"📄 Document extraction service initialized. Active Engine: {settings.OCR_ENGINE}")
-
+print(f"📄 Extraction service (Client Mode) initialized using: {OCR_SERVICE_URL}")
 
 @dataclass
 class _ChunkDoc:
@@ -425,43 +278,6 @@ def _build_lc_docs_from_document(document: Any, offset_page_no: int = 0) -> list
     return out
 
 
-def _convert_with_ocr(tmp_path: str):
-
-    """Convert document with OCR path (SuryaOCR preferred, RapidOCR fallback, Tesseract last """
-    format_options = get_ocr_format_options()
-    
-    engine_map = {
-        "falconocr": "Falcon-OCR (VLM)",
-        "suryaocr": "SuryaOCR",
-        "rapidocr": "RapidOCR"
-    }
-    engine_name = engine_map.get(settings.OCR_ENGINE.lower(), "RapidOCR")
-    
-    print(f"🔍 Using OCR Engine: {engine_name}")
-    converter = ConverterRegistry.get("ocr")
-    try:
-        result = converter.convert(tmp_path)
-        return result, converter
-    except Exception as exc:
-        print(f"⚠️  {engine_name} failed ({exc})")
-        
-        # If Surya/Falcon failed, try RapidOCR before falling back to Tesseract
-        if settings.OCR_ENGINE.lower() in ["suryaocr", "falconocr"]:
-            print("   Falling back to RapidOCR")
-            # We don't cache this fallback since it's rare
-            fallback_converter = DocumentConverter(format_options=_ocr_format_options)
-            try:
-                result = fallback_converter.convert(tmp_path)
-                return result, fallback_converter
-            except Exception as exc2:
-                print(f"⚠️  RapidOCR also failed ({exc2})")
-        
-        print("   Falling back to Tesseract OCR")
-        converter = ConverterRegistry.get("fallback")
-        result = converter.convert(tmp_path)
-        return result, converter
-
-
 def extract_and_chunk(
     file_bytes: bytes,
     filename: str,
@@ -469,121 +285,59 @@ def extract_and_chunk(
 ) -> tuple[list, str, int]:
     """
     Extract text from a document and chunk it using Docling's HybridChunker.
-
-    Three-tier pipeline for PDFs:
-      1. Lean parse  (no OCR, no table structure) — fastest
-      2. If tables detected → re-parse with FAST table structure
-      3. If text-sparse  → re-parse with OCR
-
-    Args:
-        file_bytes:     Raw file content
-        filename:       Original filename (used for extension detection)
-        offset_page_no: Page number offset for merged parallel segments
-
-    Returns:
-        (lc_docs, full_text, page_count)
-        - lc_docs:    list of LangChain Document objects (chunked)
-        - full_text:  full markdown text of the document
-        - page_count: number of pages detected
+    Uses a remote OCR service for the actual conversion to keep workers light.
     """
     ext = Path(filename).suffix.lower()
     if not ext:
         ext = ".pdf"
 
-    # Write bytes to a temp file (Docling needs a file path)
-    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-        tmp.write(file_bytes)
-        tmp_path = tmp.name
-
-    full_text = ""
-    page_count = 0
-    converter = None
-
     try:
         t0 = time.time()
-        print(f"📄 Docling: parsing {filename} ...")
+        print(f"📄 Docling: processing {filename} ...")
 
-        # ── Step 1: Convert document ──────────────────────────────────────
+        # ── Step 1: Decision & Conversion ──────────────────────────────────
+        tier = "lean"
+        
         if ext == ".pdf":
-            # — Fast Detection: Skip Lean/Enriched if confirmed scanned ——————
-            if is_scanned_pdf_fast(tmp_path):
-                print("🧾 Fast detection: Scanned PDF confirmed. Jumping to Tier 3 (OCR)")
-                result, converter = _convert_with_ocr(tmp_path)
-                full_text = result.document.export_to_markdown()
-                page_count = _get_page_count(result)
+            # Fast Local Check
+            if is_scanned_pdf_fast_bytes(file_bytes):
+                print("🧾 Fast detection: Scanned PDF confirmed. Using Tier 3 (OCR)")
+                tier = "ocr"
             else:
-                # — Tier 1: Lean parse (no OCR, no table structure) ————————————
-                print("⚡ Tier 1 (lean): parsing PDF without OCR or table structure")
-                converter = ConverterRegistry.get("lean")
-                result = converter.convert(tmp_path)
-                full_text = result.document.export_to_markdown()
-                page_count = _get_page_count(result)
-                t_lean = time.time() - t0
-                print(f"   Lean parse done in {t_lean:.1f}s — {page_count} pages, {len(full_text)} chars")
-
-                if _should_enable_ocr(ext=ext, full_text=full_text, page_count=page_count):
-                    # — Tier 3: OCR path (scanned PDF fallback) —————————————————
+                # Preliminary Lean Parse to check for tables
+                doc, markdown, page_count = remote_convert(file_bytes, filename, tier="lean")
+                
+                if _should_enable_ocr(ext, markdown, page_count):
                     print("🧾 Low text density detected; switching to Tier 3 (OCR)")
-                    result, converter = _convert_with_ocr(tmp_path)
-                    full_text = result.document.export_to_markdown()
-                    page_count = _get_page_count(result)
-                elif _needs_table_enrichment(result.document):
-                    # — Tier 2: Enriched parse (table-heavy PDF) ———————————————
-                    t1 = time.time()
-                    table_count = sum(
-                        1 for item in getattr(result.document, "body", [])
-                        if "table" in str(getattr(item, "label", "")).lower()
-                    )
-                    print(f"📊 Detected {table_count} tables; switching to Tier 2 (FAST table structure)")
-                    converter = ConverterRegistry.get("enriched")
-                    result = converter.convert(tmp_path)
-                    full_text = result.document.export_to_markdown()
-                    page_count = _get_page_count(result)
-                    t_enrich = time.time() - t1
-                    print(f"   Enriched parse done in {t_enrich:.1f}s")
+                    tier = "ocr"
+                elif _needs_table_enrichment(doc):
+                    print("📊 Tables detected; switching to Tier 2 (enriched)")
+                    tier = "enriched"
                 else:
-                    print("✅ Text-rich PDF with few/no tables; lean parse is sufficient")
+                    print("✅ Lean parse is sufficient")
+                    # Already converted, skip redundant remote call
+                    return _process_doc_result(doc, markdown, page_count, t0, offset_page_no)
 
-        else:
-            # Non-PDF formats always go through OCR path
-            result, converter = _convert_with_ocr(tmp_path)
-            full_text = result.document.export_to_markdown()
-            page_count = _get_page_count(result)
+        # Final Remote Convert (if not already returned)
+        doc, markdown, page_count = remote_convert(file_bytes, filename, tier=tier)
+        return _process_doc_result(doc, markdown, page_count, t0, offset_page_no)
 
-        t_total = time.time() - t0
-        print(f"✅ Docling: parsed {page_count} pages, {len(full_text)} chars in {t_total:.1f}s")
+    except Exception as err:
+        print(f"❌ Extraction failed: {err}")
+        raise
 
-        # ── Step 2: Chunk directly from conversion result (single pass) ────
-        lc_docs = _build_lc_docs_from_document(result.document, offset_page_no=offset_page_no)
-        if not lc_docs:
-            raise RuntimeError("No chunks produced from direct Docling chunking")
-        print(f"✂️  Docling: produced {len(lc_docs)} chunks")
-        return lc_docs, full_text, page_count
-    except Exception as chunk_err:
-        # Compatibility fallback: keep old path as a safety net.
-        print(f"⚠️  Direct chunking path failed ({chunk_err}); falling back to DoclingLoader")
-        if converter is None:
-            converter = ConverterRegistry.get("ocr")
-        loader = DoclingLoader(
-            file_path=tmp_path,
-            export_type=ExportType.DOC_CHUNKS,
-            converter=converter,
-            chunker=HybridChunker(
-                tokenizer=get_tokenizer(),
-                max_tokens=600,
-                merge_peers=True,
-            ),
-        )
-        lc_docs = loader.load()
-        if not full_text:
-            full_text = "\n\n".join((doc.page_content or "") for doc in lc_docs).strip()
-        if page_count <= 0:
-            page_count = 1
-        print(f"✂️  Docling: produced {len(lc_docs)} chunks")
-        return lc_docs, full_text, page_count
 
-    finally:
-        os.unlink(tmp_path)
+def _process_doc_result(doc, markdown, page_count, t_start, offset_page_no):
+    t_total = time.time() - t_start
+    print(f"✅ Docling: parsed {page_count} pages in {t_total:.1f}s")
+    
+    # ── Step 2: Chunk directly from conversion result (single pass) ──
+    lc_docs = _build_lc_docs_from_document(doc, offset_page_no=offset_page_no)
+    if not lc_docs:
+        raise RuntimeError("No chunks produced from Docling document")
+    
+    print(f"✂️  Docling: produced {len(lc_docs)} chunks")
+    return lc_docs, markdown, page_count
 
 
 def _estimate_page_count(document) -> int:

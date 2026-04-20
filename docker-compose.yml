@@ -170,7 +170,7 @@ services:
       dockerfile: Dockerfile
     container_name: contract_rfi_ocr
     restart: always
-    command: python -m backend.ocr_service.main
+    command: python -m ocr_service.main
     ports:
       - "127.0.0.1:8001:8001"
     env_file:

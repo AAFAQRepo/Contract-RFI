@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 import tempfile
 import os
 import time
-from backend.ocr_service.utils import ConverterRegistry
+from ocr_service.utils import ConverterRegistry
 
 app = FastAPI(title="Contract RFI OCR Service")
 

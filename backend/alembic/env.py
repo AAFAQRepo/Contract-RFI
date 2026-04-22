@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.config import get_settings
 from core.database import Base
 from models.models import (
-    User, Document, Chunk, Review, Chat, QueryLog, CacheEntry,
+    User, Organization, Document, Chunk, Review, Chat, QueryLog, CacheEntry,
 )
 
 # ── DATABASE CONNECTION LOGIC ──

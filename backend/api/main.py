@@ -22,9 +22,10 @@ async def seed_dummy_user():
         hashed_pw = get_password_hash("admin123")
         
         await db.execute(text(
-            f"INSERT INTO users (id, email, name, password_hash) VALUES ('{user_id}', '{email}', 'Admin', '{hashed_pw}') "
+            "INSERT INTO users (id, email, name, password_hash) "
+            "VALUES (:id, :email, :name, :password_hash) "
             "ON CONFLICT (id) DO UPDATE SET password_hash = EXCLUDED.password_hash"
-        ))
+        ), {"id": user_id, "email": email, "name": "Admin", "password_hash": hashed_pw})
         await db.commit()
         print(f"✅ User {email} seeded/updated")
 

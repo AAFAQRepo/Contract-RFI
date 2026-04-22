@@ -13,6 +13,19 @@ from sqlalchemy.orm import relationship
 from core.database import Base
 
 
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
+    slug = Column(String, unique=True, nullable=True)
+    owner_id = Column(UUID(as_uuid=True), nullable=True)  # Set after user creation
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    users = relationship("User", back_populates="organization")
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -20,10 +33,27 @@ class User(Base):
     email = Column(String, unique=True, nullable=False)
     name = Column(String, nullable=True)
     password_hash = Column(String, nullable=False)
+    company = Column(String, nullable=True)
+    role = Column(String, default="user")  # user, admin, owner
+    
+    # Auth & Onboarding
+    is_verified = Column(Boolean, default=False)
+    onboarding_completed = Column(Boolean, default=False)
+    verification_token = Column(String, nullable=True)
+    reset_token = Column(String, nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
+    
+    avatar_url = Column(String, nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
+    
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
+    organization = relationship("Organization", back_populates="users")
+    onboarding_response = relationship("OnboardingResponse", back_populates="user", uselist=False)
     documents = relationship("Document", back_populates="user", cascade="all, delete-orphan")
     chats = relationship("Chat", back_populates="user", cascade="all, delete-orphan")
 
@@ -167,3 +197,18 @@ class CacheEntry(Base):
     __table_args__ = (
         Index("idx_cache_document_hash", "document_id", "query_hash"),
     )
+
+
+class OnboardingResponse(Base):
+    __tablename__ = "onboarding_responses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    use_case = Column(String, nullable=True) # e.g. Contract Review, RFI
+    preferred_language = Column(String, default="en")
+    company_name = Column(String, nullable=True)
+    selected_plan = Column(String, default="free")
+    completed_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="onboarding_response")

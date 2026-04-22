@@ -11,8 +11,9 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (email, password) => {
     const res = await api.post('/auth/login', { email, password })
-    const { access_token, user: userData } = res.data
+    const { access_token, refresh_token, user: userData } = res.data
     localStorage.setItem('token', access_token)
+    localStorage.setItem('refresh_token', refresh_token)
     localStorage.setItem('user', JSON.stringify(userData))
     setToken(access_token)
     setUser(userData)
@@ -21,6 +22,7 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => {
     localStorage.removeItem('token')
+    localStorage.removeItem('refresh_token')
     localStorage.removeItem('user')
     localStorage.removeItem('forceHistory')
     setToken(null)

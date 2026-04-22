@@ -6,6 +6,9 @@ import AppLayout from './layouts/AppLayout'
 import AuthLayout from './layouts/AuthLayout'
 import ChatPage from './pages/ChatPage'
 import LoginPage from './pages/LoginPage'
+import RegisterPage from './pages/RegisterPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import OnboardingWizard from './pages/onboarding/OnboardingWizard'
 import './index.css'
 import './App.css'
 
@@ -18,11 +21,16 @@ export default function App() {
             {/* Public Routes */}
             <Route element={<AuthLayout />}>
               <Route path="/login" element={<LoginPage />} />
-              {/* Future: /register, /forgot-password */}
+              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             </Route>
 
             {/* Protected Routes */}
             <Route element={<ProtectedRoute />}>
+              <Route path="/onboarding" element={<OnboardingWizard />} />
+            </Route>
+
+            <Route element={<ProtectedRoute requireOnboarded />}>
               <Route element={<AppLayout />}>
                 <Route path="/" element={<ChatPage />} />
                 <Route path="/chat" element={<ChatPage />} />

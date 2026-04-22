@@ -23,7 +23,7 @@ export default function OnboardingWizard() {
   })
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, fetchUser } = useAuth()
 
   const handleNext = () => {
     if (step < STEPS.length - 1) setStep(step + 1)
@@ -34,6 +34,7 @@ export default function OnboardingWizard() {
     setLoading(true)
     try {
       await api.post('/auth/onboarding', data)
+      await fetchUser() // Refresh user state to mark onboarding_completed: true
       addToast('Onboarding completed! Welcome to Contract RFI.', 'success')
       navigate('/')
     } catch (err) {

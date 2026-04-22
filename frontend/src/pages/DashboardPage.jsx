@@ -48,7 +48,7 @@ export default function DashboardPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 500 }}>{title}</div>
           <div style={{ padding: 8, borderRadius: 8, background: `${color}15`, color: color }}>
-            <Icon name={icon} size={20} />
+            {icon}
           </div>
         </div>
         <div style={{ fontSize: '1.8rem', fontWeight: 700 }}>
@@ -73,7 +73,7 @@ export default function DashboardPage() {
           <p style={{ color: 'var(--text-secondary)' }}>Here's what's happening in your workspace.</p>
         </div>
         <button className="login-submit" style={{ width: 'auto', padding: '12px 24px' }} onClick={() => navigate('/chat')}>
-          <Icon name="plus" size={18} style={{ marginRight: 8 }} />
+          <span style={{ marginRight: 8, display: 'inline-flex' }}><Icon.Plus /></span>
           New Analysis
         </button>
       </header>
@@ -84,10 +84,10 @@ export default function DashboardPage() {
         gap: 24,
         marginBottom: 48
       }}>
-        <StatCard title="Documents" value={stats?.totals.documents} icon="library" color="#6366f1" />
-        <StatCard title="AI Queries" value={stats?.usage.queries.used} limit={stats?.usage.queries.limit} icon="zap" color="#f59e0b" />
-        <StatCard title="Monthly Cap" value={stats?.usage.documents.used} limit={stats?.usage.documents.limit} icon="file" color="#10b981" />
-        <StatCard title="Total Messages" value={stats?.totals.messages} icon="message" color="#ec4899" />
+        <StatCard title="Documents" value={stats?.totals?.documents || 0} icon={<Icon.Library />} color="#6366f1" />
+        <StatCard title="AI Queries" value={stats?.usage?.queries?.used || 0} limit={stats?.usage?.queries?.limit} icon={<Icon.Workflows />} color="#f59e0b" />
+        <StatCard title="Monthly Cap" value={stats?.usage?.documents?.used || 0} limit={stats?.usage?.documents?.limit} icon={<Icon.Plus />} color="#10b981" />
+        <StatCard title="Total Messages" value={stats?.totals?.messages || 0} icon={<Icon.Search />} color="#ec4899" />
       </section>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 48 }}>
@@ -118,7 +118,7 @@ export default function DashboardPage() {
                   alignItems: 'center',
                   justifyContent: 'center'
                 }}>
-                  <Icon name={act.type === 'document' ? 'file' : 'message'} size={20} />
+                  {act.type === 'document' ? <Icon.Library /> : <Icon.Workflows />}
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{act.title}</div>

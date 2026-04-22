@@ -57,6 +57,14 @@ class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
 
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    company: Optional[str] = None
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
 # ── ROUTES ──
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -208,4 +216,34 @@ async def reset_password(request: ResetPasswordRequest, db: AsyncSession = Depen
     user.reset_token_expires = None
     await db.commit()
     
+    return {"message": "Password updated successfully"}
+
+@router.patch("/me", response_model=UserResponse)
+async def update_profile(
+    request: ProfileUpdate, 
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update user profile details."""
+    if request.name is not None:
+        current_user.name = request.name
+    if request.company is not None:
+        current_user.company = request.company
+    
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
+@router.post("/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Securely change user password."""
+    if not verify_password(request.old_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Invalid old password")
+    
+    current_user.password_hash = get_password_hash(request.new_password)
+    await db.commit()
     return {"message": "Password updated successfully"}

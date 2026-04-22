@@ -11,6 +11,8 @@ from models.models import User, Chat
 from services.retrieval import HybridRetriever, RetrievedChunk
 from services.llm import LLMService
 
+from core.limits import check_usage_limit, increment_usage
+
 router = APIRouter()
 retriever = HybridRetriever()
 llm_service = LLMService()
@@ -20,6 +22,7 @@ llm_service = LLMService()
 class ChatQuery(BaseModel):
     query: str
     document_id: Optional[str] = None
+    conversation_id: Optional[str] = None
 
 class SourceChunk(BaseModel):
     document_id: str
@@ -45,6 +48,7 @@ async def chat_message(
     payload: ChatQuery,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _limit: bool = Depends(check_usage_limit("queries")),
 ):
     """
     Main RAG Chat Entry Point with Streaming & Persistence.
@@ -97,8 +101,22 @@ async def chat_message(
             final_answer = parts[1].strip()
 
         # Save to DB
+        from models.models import Conversation
+        
+        conv_id = payload.conversation_id
+        if not conv_id:
+            # Create new conversation
+            new_conv = Conversation(
+                user_id=current_user.id,
+                title=payload.query[:50] + "..." if len(payload.query) > 50 else payload.query
+            )
+            db.add(new_conv)
+            await db.flush()
+            conv_id = new_conv.id
+
         new_chat = Chat(
             user_id=current_user.id,
+            conversation_id=conv_id,
             document_id=payload.document_id if payload.document_id else None,
             query=payload.query,
             answer=final_answer,
@@ -109,23 +127,49 @@ async def chat_message(
         db.add(new_chat)
         await db.commit()
 
+        # Increment usage
+        await increment_usage(current_user.org_id, "queries", db)
+
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@router.get("/conversations")
+async def list_conversations(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all chat sessions for the current user."""
+    from models.models import Conversation
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.user_id == current_user.id)
+        .order_by(Conversation.updated_at.desc())
+    )
+    convs = result.scalars().all()
+    return [{
+        "id": str(c.id),
+        "title": c.title,
+        "updated_at": c.updated_at.isoformat()
+    } for c in convs]
 
 @router.get("/history", response_model=List[ChatResponse])
 async def chat_history(
+    conversation_id: Optional[str] = Query(None),
     document_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Fetch persistent chat history for a document or 'global' (None)."""
+    """Fetch persistent chat history for a session or document."""
+    from models.models import Chat
     
     query = select(Chat).where(Chat.user_id == current_user.id)
+    if conversation_id:
+        query = query.where(Chat.conversation_id == conversation_id)
+    elif document_id:
+        if document_id == "global":
+            query = query.where(Chat.document_id == None)
+        else:
+            query = query.where(Chat.document_id == document_id)
     
-    if document_id == "global" or not document_id:
-        query = query.where(Chat.document_id == None)
-    else:
-        query = query.where(Chat.document_id == document_id)
-        
     result = await db.execute(query.order_by(Chat.created_at.asc()))
     chats = result.scalars().all()
     

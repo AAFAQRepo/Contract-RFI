@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Logo, Icon } from '../../components/common/Icon'
 import api from '../../api/client'
 import { useAuth } from '../../contexts/AuthContext'
+import { useToast } from '../../contexts/ToastContext'
 
 const STEPS = [
   { id: 'welcome', title: 'Welcome' },
@@ -12,6 +13,7 @@ const STEPS = [
 ]
 
 export default function OnboardingWizard() {
+  const { addToast } = useToast()
   const [step, setStep] = useState(0)
   const [data, setData] = useState({
     use_case: 'Contract Review',
@@ -32,9 +34,10 @@ export default function OnboardingWizard() {
     setLoading(true)
     try {
       await api.post('/auth/onboarding', data)
+      addToast('Onboarding completed! Welcome to Contract RFI.', 'success')
       navigate('/')
     } catch (err) {
-      alert('Something went wrong. Please try again.')
+      addToast('Failed to save onboarding preferences. Please try again.', 'error')
     } finally {
       setLoading(false)
     }

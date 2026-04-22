@@ -48,6 +48,7 @@ pillow>=10.0.0
 openai>=1.0.0
 httpx>=0.25.0
 
-# ── Authentication ──
+# ── Authentication & Billing ──
 python-jose[cryptography]==3.3.0
 bcrypt==5.0.0
+stripe>=6.0.0

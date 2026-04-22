@@ -6,8 +6,8 @@ const ProjectContext = createContext(null)
 export function ProjectProvider({ children }) {
   const [projects, setProjects] = useState([])
   const [activeProject, setActiveProject] = useState(null)
-  const [chatSessions, setChatSessions] = useState([])
-  const [activeChatSession, setActiveChatSession] = useState(null)
+  const [conversations, setConversations] = useState([])
+  const [activeConversationId, setActiveConversationId] = useState(null)
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -21,18 +21,18 @@ export function ProjectProvider({ children }) {
     }
   }, [])
 
-  const fetchChatSessions = useCallback(async () => {
+  const fetchConversations = useCallback(async () => {
     try {
-      const r = await api.get('/chat/sessions')
-      if (Array.isArray(r.data)) setChatSessions(r.data)
+      const r = await api.get('/chat/conversations')
+      if (Array.isArray(r.data)) setConversations(r.data)
     } catch { /* silent */ }
   }, [])
 
   // Load on mount
   useEffect(() => {
     fetchProjects()
-    fetchChatSessions()
-  }, [fetchProjects, fetchChatSessions])
+    fetchConversations()
+  }, [fetchProjects, fetchConversations])
 
   const addProject = useCallback((doc) => {
     setProjects(prev => [doc, ...prev])
@@ -45,15 +45,15 @@ export function ProjectProvider({ children }) {
 
   const resetForNewProject = useCallback(() => {
     setActiveProject(null)
-    setActiveChatSession(null)
+    setActiveConversationId(null)
     localStorage.removeItem('forceHistory')
   }, [])
 
   return (
     <ProjectContext.Provider value={{
       projects, setProjects, activeProject, setActiveProject,
-      chatSessions, fetchChatSessions,
-      activeChatSession, setActiveChatSession,
+      conversations, fetchConversations,
+      activeConversationId, setActiveConversationId,
       fetchProjects, addProject, removeProject, resetForNewProject,
     }}>
       {children}

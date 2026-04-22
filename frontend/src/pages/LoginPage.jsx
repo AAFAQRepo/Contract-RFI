@@ -4,8 +4,8 @@ import { Logo } from '../components/common/Icon'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('admin@contractrfi.com')
-  const [password, setPassword] = useState('admin123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { login } = useAuth()
@@ -66,7 +66,7 @@ export default function LoginPage() {
         </form>
 
         <div className="login-footer">
-          <p>Don't have an account? <span>Contact support</span></p>
+          <p>Don't have an account? <Link to="/register">Create one</Link></p>
         </div>
       </div>
     </div>

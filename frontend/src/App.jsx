@@ -36,16 +36,11 @@ export default function App() {
 
             {/* Protected Routes */}
             <Route element={<ProtectedRoute />}>
-              <Route path="/onboarding" element={<OnboardingWizard />} />
-            </Route>
-
-            <Route element={<ProtectedRoute requireOnboarded />}>
               <Route element={<AppLayout />}>
                 <Route path="/" element={<DashboardPage />} />
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/billing" element={<BillingPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
-                {/* Future: /documents, /dashboard, /settings */}
               </Route>
             </Route>
 

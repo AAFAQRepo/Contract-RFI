@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     USE_GPU_SERVER: bool = False
     GPU_SERVER_IP: str = "localhost"
 
+    # ── SMTP (Email) ──
+    SMTP_HOST: str = "smtp.email.eu-frankfurt-1.oci.oraclecloud.com"
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = "noreply@notification.eu-frankfurt-1.oci.oraclecloud.com"
+    SMTP_TLS: bool = True
+
     model_config = {
         "env_file": [".env", "../.env"],
         "env_file_encoding": "utf-8",

@@ -1,8 +1,9 @@
 from uuid import UUID
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
 from pydantic import BaseModel, EmailStr, ConfigDict
+import random
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from jose import jwt, JWTError
@@ -18,6 +19,8 @@ from core.auth import (
 )
 from core.database import get_db
 from models.models import User, Organization
+from core.rate_limit import limiter
+from core.email import send_otp_email
 
 router = APIRouter()
 
@@ -68,13 +71,31 @@ class ChangePasswordRequest(BaseModel):
     old_password: str
     new_password: str
 
+class VerifyOTPRequest(BaseModel):
+    email: EmailStr
+    otp: str
+
+class ResendOTPRequest(BaseModel):
+    email: EmailStr
+
 # ── ROUTES ──
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(request: UserRegister, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def register(
+    request: UserRegister, 
+    req: Request, 
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
     """Register a new user and create their organization."""
+    normalized_email = request.email.lower().strip()
+    
+    if len(request.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
+        
     # Check if user exists
-    existing = await db.execute(select(User).where(User.email == request.email))
+    existing = await db.execute(select(User).where(User.email == normalized_email))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -84,15 +105,19 @@ async def register(request: UserRegister, db: AsyncSession = Depends(get_db)):
     db.add(org)
     await db.flush() # Get org.id
 
+    # Generate 6-digit OTP
+    otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
+
     # Create User
     new_user = User(
-        email=request.email,
+        email=normalized_email,
         name=request.name,
         password_hash=get_password_hash(request.password),
         company=request.company,
         role="owner", # First user is owner
         org_id=org.id,
-        is_verified=False # Should trigger email in production
+        is_verified=False,
+        verification_token=otp
     )
     db.add(new_user)
     await db.flush()
@@ -101,12 +126,17 @@ async def register(request: UserRegister, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(new_user)
 
-    return {"message": "User registered successfully", "user_id": str(new_user.id)}
+    # Send verification email in background
+    background_tasks.add_task(send_otp_email, normalized_email, otp)
+
+    return {"message": "User registered successfully", "user_id": str(new_user.id), "email": normalized_email}
 
 @router.post("/login")
-async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def login(request: LoginRequest, req: Request, db: AsyncSession = Depends(get_db)):
     """Authenticate and return access + refresh tokens."""
-    result = await db.execute(select(User).where(User.email == request.email))
+    normalized_email = request.email.lower().strip()
+    result = await db.execute(select(User).where(User.email == normalized_email))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(request.password, user.password_hash):
@@ -114,6 +144,12 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not verified. Please verify your account first."
         )
 
     # Update last login
@@ -188,9 +224,11 @@ async def save_onboarding(request: OnboardingResponseSchema, db: AsyncSession = 
     await db.commit()
     return {"message": "Onboarding completed"}
 @router.post("/forgot-password")
-async def forgot_password(request: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("3/minute")
+async def forgot_password(request: ForgotPasswordRequest, req: Request, db: AsyncSession = Depends(get_db)):
     """Generate a reset token and 'send' an email."""
-    result = await db.execute(select(User).where(User.email == request.email))
+    normalized_email = request.email.lower().strip()
+    result = await db.execute(select(User).where(User.email == normalized_email))
     user = result.scalar_one_or_none()
     
     if user:
@@ -206,7 +244,8 @@ async def forgot_password(request: ForgotPasswordRequest, db: AsyncSession = Dep
     return {"message": "If your email is registered, you will receive a reset link."}
 
 @router.post("/reset-password")
-async def reset_password(request: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("3/minute")
+async def reset_password(request: ResetPasswordRequest, req: Request, db: AsyncSession = Depends(get_db)):
     """Reset password using a valid token."""
     result = await db.execute(select(User).where(User.reset_token == request.token))
     user = result.scalar_one_or_none()
@@ -250,3 +289,64 @@ async def change_password(
     current_user.password_hash = get_password_hash(request.new_password)
     await db.commit()
     return {"message": "Password updated successfully"}
+
+@router.get("/check-email")
+@limiter.limit("10/minute")
+async def check_email(email: EmailStr, req: Request, db: AsyncSession = Depends(get_db)):
+    """Check if an email is already registered. Returns available: bool"""
+    normalized_email = email.lower().strip()
+    result = await db.execute(select(User).where(User.email == normalized_email))
+    existing = result.scalar_one_or_none()
+    return {"available": existing is None}
+
+@router.post("/verify-otp")
+@limiter.limit("10/minute")
+async def verify_otp(request: VerifyOTPRequest, req: Request, db: AsyncSession = Depends(get_db)):
+    """Verify the 6-digit OTP and activate the user account."""
+    normalized_email = request.email.lower().strip()
+    result = await db.execute(select(User).where(User.email == normalized_email))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    if user.is_verified:
+        return {"message": "Account already verified", "verified": True}
+        
+    if user.verification_token != request.otp:
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+        
+    user.is_verified = True
+    user.verification_token = None
+    await db.commit()
+    
+    return {"message": "Email verified successfully", "verified": True}
+
+@router.post("/resend-otp")
+@limiter.limit("2/minute")
+async def resend_otp(
+    request: ResendOTPRequest, 
+    req: Request, 
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    """Regenerate and resend a 6-digit OTP."""
+    normalized_email = request.email.lower().strip()
+    result = await db.execute(select(User).where(User.email == normalized_email))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    if user.is_verified:
+        return {"message": "Account already verified"}
+        
+    # Generate new OTP
+    otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
+    user.verification_token = otp
+    await db.commit()
+    
+    # Send verification email in background
+    background_tasks.add_task(send_otp_email, normalized_email, otp)
+    
+    return {"message": "Verification code resent"}

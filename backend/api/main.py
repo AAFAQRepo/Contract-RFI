@@ -11,6 +11,9 @@ from core.auth import get_password_hash
 
 from sqlalchemy import text
 from core.database import async_session
+from core.rate_limit import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 async def seed_dummy_user():
     """Seed a real admin user for login (admin@contractrfi.com / admin123)."""
@@ -48,6 +51,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ──
 app.add_middleware(

@@ -1035,3 +1035,59 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   font-weight: 500;
   cursor: pointer;
 }
+
+/* ── Prompt Templates ── */
+.prompt-templates {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 8px;
+  flex-wrap: wrap;
+}
+.prompt-template-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #fff;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font);
+}
+.prompt-template-btn:hover { background: var(--bg-hover); color: var(--text); border-color: #ccc; }
+.prompt-template-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Source Chips ── */
+.msg-sources {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.source-chip {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #e8eaf6;
+  color: #3949ab;
+  cursor: default;
+}
+
+/* ── File Card Delete ── */
+.file-card-delete-btn {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.file-card:hover .file-card-delete-btn { opacity: 1; }
+.file-card-delete-btn:hover { color: #d32f2f; background: #fce8e8; }

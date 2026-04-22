@@ -1,250 +1,12 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import api from '../api/client'
-import { Icon, Logo } from '../App'
-
-/* ── File doc type icon ──────────────────────────────────────── */
-function DocIcon({ name = '' }) {
-  const ext = name.split('.').pop()?.toLowerCase()
-  const colors = { pdf: '#e53935', docx: '#1e88e5', doc: '#1e88e5' }
-  const bg = colors[ext] || '#757575'
-  const label = ext?.toUpperCase().slice(0, 3) || 'DOC'
-  return <div className="file-card-icon" style={{ background: bg }}>{label}</div>
-}
-
-/* ── Progress Ring ───────────────────────────────────────────── */
-function ProgressRing({ percent = 0, size = 16, stroke = 2 }) {
-  const radius = (size - stroke) / 2
-  const circ = 2 * Math.PI * radius
-  const offset = circ - (percent / 100) * circ
-  return (
-    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-      <circle cx={size/2} cy={size/2} r={radius} fill="transparent" stroke="rgba(255,255,255,0.2)" strokeWidth={stroke} />
-      <circle cx={size/2} cy={size/2} r={radius} fill="transparent" stroke="currentColor" strokeWidth={stroke} strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 0.3s ease' }} />
-    </svg>
-  )
-}
-
-/* ── Status Badge ──────────────────────────────────────────── */
-const STATUS_MAP = { 
-  uploading: ['Uploading', 'badge-uploading'], 
-  processing: ['Processing', 'badge-processing'], 
-  ready: ['Ready', 'badge-ready'], 
-  error: ['Error', 'badge-error'] 
-}
-function StatusBadge({ status, step, progress }) {
-  const [label, cls] = STATUS_MAP[status] || [status, '']
-  
-  if (status === 'processing') {
-    return (
-      <span className={`badge ${cls}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <ProgressRing percent={progress || 0} />
-        <span>{step || label} {progress ? `${progress}%` : ''}</span>
-      </span>
-    )
-  }
-  
-  return <span className={`badge ${cls}`}>{label}</span>
-}
-
-/* ── File Chip (Inside Input) ─────────────────────────────────── */
-function FileChip({ file, onRemove }) {
-  return (
-    <div className="file-chip">
-      <DocIcon name={file.filename || file.name} />
-      <span>{file.filename || file.name}</span>
-      <button className="file-chip-remove" onClick={onRemove}>
-        <Icon.Close />
-      </button>
-    </div>
-  )
-}
-
-/* ── Right Files Panel ───────────────────────────────────────── */
-function FilesPanel({ files, onUpload, onUploadClick, uploading, dragOver, setDragOver, onClose, onDelete }) {
-  return (
-    <aside className="files-panel">
-      <div className="files-panel-header">
-        <span>{files.length} File{files.length !== 1 ? 's' : ''}</span>
-        <button className="topbar-icon-btn" title="Close panel" onClick={onClose} style={{ border: 'none', width: 24, height: 24 }}>
-          <Icon.Columns />
-        </button>
-      </div>
-      <div className="files-panel-body">
-        {files.map(f => (
-          <div key={f.id} className="file-card" id={`file-card-${f.id}`}>
-            <DocIcon name={f.filename} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="file-card-name">{f.filename}</div>
-              <div style={{ marginTop: 4 }}><StatusBadge status={f.status} step={f.processing_step} progress={f.progress_percent} /></div>
-            </div>
-            <button
-              className="file-card-delete-btn"
-              title="Delete document"
-              onClick={() => onDelete(f)}
-            >
-              <Icon.Close />
-            </button>
-          </div>
-        ))}
-        <div
-          className={`upload-drop-area ${dragOver ? 'drag-over' : ''}`}
-          style={{ marginTop: files.length ? 12 : 0 }}
-          onClick={onUploadClick}
-          onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) onUpload(f) }}
-        >
-          <Icon.Attach />
-          <div className="upload-drop-text">{uploading ? 'Uploading…' : 'Add files'}</div>
-        </div>
-      </div>
-    </aside>
-  )
-}
-
-/* ── Markdown / Table Renderer ───────────────────────────────── */
-function formatAIText(text) {
-  if (!text) return ''
-
-  // Replace code blocks
-  text = text.replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) =>
-    `<pre class="ai-code-block"><code>${code.replace(/</g, '&lt;').replace(/>/g, '&gt;').trim()}</code></pre>`
-  )
-
-  // Parse markdown tables
-  text = text.replace(/((?:\|.+\|\n?){3,})/g, (tableBlock) => {
-    const lines = tableBlock.trim().split('\n').filter(l => l.trim())
-    const isTable = lines.length >= 2 && lines.every(l => l.trim().startsWith('|'))
-    if (!isTable) return tableBlock
-
-    const parseRow = (line) => line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim())
-    const headers = parseRow(lines[0])
-    const isAlignRow = (l) => /^\|[\s\-:|\s]+\|$/.test(l.trim())
-    const bodyLines = lines.slice(1).filter(l => !isAlignRow(l))
-
-    const head = `<thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>`
-    const body = `<tbody>${bodyLines.map(l => `<tr>${parseRow(l).map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>`
-    return `<div class="ai-table-wrapper"><table class="ai-table">${head}${body}</table></div>`
-  })
-
-  // Headings
-  text = text.replace(/^### (.+)$/gm, '<h3 class="ai-h3">$1</h3>')
-  text = text.replace(/^## (.+)$/gm, '<h2 class="ai-h2">$1</h2>')
-  text = text.replace(/^# (.+)$/gm, '<h1 class="ai-h1">$1</h1>')
-
-  // Bold, italic
-  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  text = text.replace(/\*(.+?)\*/g, '<em>$1</em>')
-
-  // Lists (gather consecutive - lines into a <ul>)
-  text = text.replace(/((?:^[-•] .+\n?)+)/gm, (block) => {
-    const items = block.trim().split('\n').map(l => `<li>${l.replace(/^[-•] /, '')}</li>`)
-    return `<ul class="ai-list">${items.join('')}</ul>`
-  })
-
-  // Numbered lists
-  text = text.replace(/((?:^\d+\. .+\n?)+)/gm, (block) => {
-    const items = block.trim().split('\n').map(l => `<li>${l.replace(/^\d+\. /, '')}</li>`)
-    return `<ol class="ai-list">${items.join('')}</ol>`
-  })
-
-  // Horizontal rules
-  text = text.replace(/^[=\-]{3,}$/gm, '<hr class="ai-hr">')
-
-  // Paragraphs (remaining lines)
-  const lines = text.split('\n')
-  const out = []
-  for (const line of lines) {
-    const t = line.trim()
-    if (!t) continue
-    if (/^<(h[1-3]|ul|ol|pre|div|hr|table)/.test(t)) {
-      out.push(t)
-    } else {
-      out.push(`<p>${t}</p>`)
-    }
-  }
-  return out.join('\n')
-}
-
-/* ── Collapsible Thinking block ──────────────────────────────── */
-function ThinkingBlock({ thinking }) {
-  const [open, setOpen] = useState(false)
-  
-  // Auto-open if thinking content starts arriving
-  useEffect(() => {
-    if (thinking && thinking.trim().length > 0) setOpen(true)
-  }, [!!thinking])
-
-  if (!thinking) return null
-
-  // Simple bullet point formatter for thinking
-  const renderedThinking = thinking.split('\n').map((line, i) => {
-    const t = line.trim()
-    if (t.startsWith('-') || t.startsWith('*')) {
-      return <li key={i} style={{ marginBottom: 4 }}>{t.substring(1).trim()}</li>
-    }
-    return <p key={i} style={{ marginBottom: 4 }}>{t}</p>
-  })
-
-  return (
-    <div className="thinking-block">
-      <button className="thinking-toggle" onClick={() => setOpen(v => !v)}>
-        <span className="thinking-dot-anim"></span>
-        <span>Thinking</span>
-        <span className={`thinking-chevron ${open ? 'open' : ''}`}></span>
-      </button>
-      {open && (
-        <div className="thinking-content">
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {renderedThinking}
-          </ul>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ── Chat messages ───────────────────────────────────────────── */
-function UserMessage({ id, text, onDelete }) {
-  // Extract base ID if it's a q- prefix
-  const realId = id && String(id).startsWith('q-') ? String(id).slice(2) : id
-  
-  return (
-    <div className="msg-user">
-      <div className="msg-user-bubble">
-        {text}
-        <button className="msg-bubble-delete" onClick={() => onDelete(realId)} title="Delete message">
-          <Icon.Trash />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function AIMessage({ id, text, thinking, sources, onDelete }) {
-  // Extract base ID if it's an a- prefix
-  const realId = id && String(id).startsWith('a-') ? String(id).slice(2) : id
-
-  return (
-    <div className="msg-ai">
-      <ThinkingBlock thinking={thinking} />
-      <div className="msg-ai-body" dangerouslySetInnerHTML={{ __html: formatAIText(text) }} />
-      {sources && sources.length > 0 && (
-        <div className="msg-sources">
-          {sources.map((s, i) => (
-            <span key={i} className="source-chip">Page {s.page}</span>
-          ))}
-        </div>
-      )}
-      <div className="msg-ai-actions">
-        <button className="msg-action-btn" title="Helpful"><Icon.ThumbUp /></button>
-        <button className="msg-action-btn" title="Not helpful"><Icon.ThumbDown /></button>
-        <button className="msg-action-btn" title="Copy" onClick={() => navigator.clipboard.writeText(text)}><Icon.Copy /></button>
-        <button className="msg-action-btn" title="Delete" onClick={() => onDelete(realId)}><Icon.Trash /></button>
-      </div>
-    </div>
-  )
-}
+import { Icon } from '../components/common/Icon'
+import { useAuth } from '../contexts/AuthContext'
+import { useProjects } from '../contexts/ProjectContext'
+import ChatInput from '../components/chat/ChatInput'
+import { UserMessage, AIMessage } from '../components/chat/ChatMessages'
+import { FilesPanel } from '../components/documents/FilesPanel'
+import PromptTemplates from '../components/chat/PromptTemplates'
 
 /* ── Greeting helper ─────────────────────────────────────────── */
 function getGreeting() {
@@ -254,208 +16,44 @@ function getGreeting() {
   return 'Good evening'
 }
 
-/* ── Simplified Input Bar: only Add Files + Send ─────────────── */
-function ChatInput({ 
-  input, setInput, onSend, onUploadClick, 
-  pendingFiles, onRemoveFile, sending, 
-  disabled=false,
-  placeholder="Ask Spellbook to edit, review, or summarize legal documents",
-  idPrefix="home"
-}) {
-  const textareaRef = useRef(null)
+export default function ChatPage() {
+  const { user } = useAuth()
+  const { 
+    activeProject: project, setActiveProject: setProject, 
+    projects, setProjects, 
+    fetchProjects, fetchChatSessions 
+  } = useProjects()
 
-  const effectivePlaceholder = disabled 
-    ? "Waiting for documents to process..." 
-    : placeholder
-
-  const handleInputChange = e => {
-    if (disabled) return
-    setInput(e.target.value)
-    const ta = textareaRef.current
-    if (ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 160) + 'px' }
-  }
-
-  const handleKeyDown = e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!disabled) onSend() }
-  }
-
-  return (
-    <div className={`chat-input-box ${disabled ? 'disabled' : ''}`}>
-      {pendingFiles.length > 0 && (
-        <div className="file-chips-container">
-          {pendingFiles.map(f => (
-            <FileChip key={f.id || f.name} file={f} onRemove={() => onRemoveFile(f)} />
-          ))}
-        </div>
-      )}
-      <textarea
-        ref={textareaRef}
-        className="chat-input-textarea"
-        placeholder={effectivePlaceholder}
-        value={input}
-        onChange={handleInputChange}
-        onKeyDown={handleKeyDown}
-        rows={1}
-        disabled={disabled}
-        id={`${idPrefix}-input`}
-      />
-      <div className="chat-input-actions chat-input-actions--simple">
-        <button className="input-action-btn" id={`${idPrefix}-add-files-btn`} onClick={onUploadClick} disabled={sending}>
-          <Icon.Attach /> Add files
-        </button>
-        <div style={{ flex: 1 }} />
-        <button
-          className={`input-send-btn ${(input.trim() || pendingFiles.length > 0) && !sending && !disabled ? 'active' : ''}`}
-          onClick={onSend}
-          disabled={(!input.trim() && pendingFiles.length === 0) || sending || disabled}
-          id={`${idPrefix}-send-btn`}
-        >
-          <Icon.Send />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-/* ── Home Screen component ───────────────────────────────────── */
-function HomeScreen({ input, setInput, onSend, onUploadClick, pendingFiles, onRemoveFile, sending, disabled, messages, setMessages, messagesEndRef, handleClearChat, handleDeleteMessage }) {
-  if (messages.length > 0) {
-    return (
-      <div className="main-area">
-        <div className="topbar">
-          <div className="topbar-left">
-            <span className="topbar-title">General Chat</span>
-          </div>
-          <div className="topbar-right">
-            <button className="topbar-btn" id="share-btn"><Icon.Share /> Share</button>
-          </div>
-        </div>
-        <div className="chat-area">
-          <div className="messages-wrapper">
-            {messages.map(msg =>
-              msg.role === 'user'
-                ? <UserMessage key={msg.id} id={msg.id} text={msg.text} onDelete={handleDeleteMessage} />
-                : <AIMessage key={msg.id} id={msg.id} text={msg.text} thinking={msg.thinking} sources={msg.sources} onDelete={handleDeleteMessage} />
-            )}
-            {sending && (
-              <div className="msg-ai">
-                <div className="thinking-block" style={{ pointerEvents: 'none' }}>
-                  <div className="thinking-toggle" style={{ cursor: 'default' }}>
-                    <span className="thinking-dot-anim"></span>
-                    <span>Thinking…</span>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
-        <div className="chat-input-wrapper">
-          <ChatInput 
-            input={input} 
-            setInput={setInput} 
-            onSend={onSend} 
-            onUploadClick={onUploadClick}
-            pendingFiles={pendingFiles}
-            onRemoveFile={onRemoveFile}
-            sending={sending}
-            disabled={disabled}
-            idPrefix="home-chat"
-          />
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="main-area">
-      <div className="home-screen">
-        <h1 className="home-greeting">{getGreeting()} Danish Ali, let's get to work</h1>
-
-        <div className="home-input-box">
-          <ChatInput 
-            input={input} 
-            setInput={setInput} 
-            onSend={onSend} 
-            onUploadClick={onUploadClick}
-            pendingFiles={pendingFiles}
-            onRemoveFile={onRemoveFile}
-            sending={sending}
-            disabled={disabled}
-            idPrefix="home"
-          />
-        </div>
-
-        <div className="home-footer">
-          <Icon.Lock /> Your data is secure and private
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ── Main ChatPage ───────────────────────────────────────────── */
-export default function ChatPage({ project, setProject, projects, setProjects, onMessageSent }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
-  const [files, setFiles] = useState([])
   const [pendingFiles, setPendingFiles] = useState([])
   const [uploading, setUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
-  const [showFiles, setShowFiles] = useState(false)   // ← closed by default
+  const [showFiles, setShowFiles] = useState(false)
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
-
-  // Load documents from API
-  useEffect(() => {
-    fetchDocuments()
-  }, [])
-
-  const fetchDocuments = async () => {
-    try {
-      const r = await api.get('/documents/')
-      const docs = r.data.documents || []
-      setFiles(docs)
-      setProjects(docs)
-    } catch (err) {
-      console.error('Failed to load documents', err)
-    }
-  }
-
-  // Global Polling for processing documents
-  useEffect(() => {
-    const hasProcessing = files.some(f => f.status === 'processing' || f.status === 'uploading')
-    if (!hasProcessing) return
-
-    const interval = setInterval(fetchDocuments, 3000)
-    return () => clearInterval(interval)
-  }, [files])
 
   // Scroll to bottom on messages
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
-  const handleClearChat = () => {
-    setMessages([])
-  }
+  // Global Polling for processing documents
+  useEffect(() => {
+    const hasProcessing = projects.some(f => f.status === 'processing' || f.status === 'uploading')
+    if (!hasProcessing) return
+
+    const interval = setInterval(fetchProjects, 3000)
+    return () => clearInterval(interval)
+  }, [projects, fetchProjects])
 
   // Load chat history when project changes
   useEffect(() => {
-    // Always clear first for a clean slate
     setMessages([])
     
     const isGlobal = !project || String(project.id).startsWith('temp-')
     const docId = isGlobal ? 'global' : project.id
 
-    // If it's a fresh mount from "New Project" (activeChatSession is null), don't fetch any history
-    // We only fetch history if we have an active document OR if we explicitly selected a chat session
-    const activeSession = localStorage.getItem('activeChatSession') // Simplified session check
-    
-    // Check if we are in "New" state (passed via URL/props would be better, but we'll use project logic)
-    if (isGlobal && !localStorage.getItem('forceHistory')) {
-       // Skip loading history to show greeting
-       return
-    }
+    if (isGlobal && !localStorage.getItem('forceHistory')) return
 
     api.get(`/chat/history?document_id=${docId}`)
       .then(r => {
@@ -469,9 +67,10 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
       .catch(err => console.error('Failed to load history', err))
   }, [project?.id])
 
-  const sendMessage = async () => {
-    if ((!input.trim() && pendingFiles.length === 0) || sending) return
-    const text = input.trim()
+  const sendMessage = async (overrideInput) => {
+    const text = (overrideInput || input).trim()
+    if ((!text && pendingFiles.length === 0) || sending) return
+    
     const attachedFiles = [...pendingFiles]
     const currentDocId = project?.id && !String(project.id).startsWith('temp-') ? project.id : null
 
@@ -502,7 +101,6 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
       let aiMessageId = Date.now() + 1
       let fullContent = ""
       
-      // Add placeholder AI message
       setMessages(m => [...m, { id: aiMessageId, role: 'ai', text: '', thinking: '', sources: [] }])
 
       while (true) {
@@ -512,7 +110,6 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
         const chunk = decoder.decode(value, { stream: true })
         fullContent += chunk
 
-        // Re-parse the whole accumulated content to find/extract <thinking>
         let currentThinking = ""
         let currentAnswer = fullContent
 
@@ -535,15 +132,14 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
         ))
       }
 
-      // Notify sidebar to refresh session list now that a new message is saved
-      if (onMessageSent) onMessageSent()
+      fetchChatSessions()
 
     } catch (err) {
       console.error('Streaming error:', err)
       setMessages(m => [...m, { 
         id: Date.now() + 2, 
         role: 'ai', 
-        text: `Sorry, I encountered an error while connecting to the AI server. (${err.message}). Please ensure the GPU server is reachable.` 
+        text: `Sorry, I encountered an error while connecting to the AI server. (${err.message})` 
       }])
     } finally {
       setSending(false)
@@ -553,18 +149,14 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
   const handleUpload = async (file) => {
     const tempFile = { id: `uploading-${Date.now()}`, filename: file.name, status: 'uploading' }
     setPendingFiles(p => [...p, tempFile])
-    
     setUploading(true)
     const form = new FormData()
     form.append('file', file)
     try {
       const r = await api.post('/documents/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })
       const newDoc = { id: r.data.document_id, filename: r.data.filename || file.name, status: 'processing', size_mb: r.data.size_mb }
-      
       setPendingFiles(p => p.map(f => f.id === tempFile.id ? newDoc : f))
-      setFiles(p => [newDoc, ...p])
       setProjects(p => [newDoc, ...p])
-      // Removed local setInterval - relying on global poller now
     } catch (e) {
       console.error('Upload failed', e)
       setPendingFiles(p => p.filter(f => f.id !== tempFile.id))
@@ -574,89 +166,39 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
   }
 
   const handleDeleteMessage = async (mid) => {
-    // mid is the raw UUID from DB (without q- or a- prefix)
     if (!window.confirm("Delete this message?")) return
     try {
       await api.delete(`/chat/${mid}`)
-      // Remove both user and AI parts if they share the same base ID in the UI
-      // (The UI prefixes them with q- and a- and uses the same DB ID)
-      setMessages(m => m.filter(msg => {
-        const msgId = msg.id.toString()
-        return !msgId.endsWith(mid)
-      }))
+      setMessages(m => m.filter(msg => !msg.id.toString().endsWith(mid)))
     } catch (e) {
-      alert('Failed to delete message: ' + (e.response?.data?.detail || e.message))
+      alert('Failed to delete message')
     }
   }
 
   const handleDeleteDocument = async (doc) => {
-    if (!window.confirm(`Delete "${doc.filename}"? This cannot be undone.`)) return
+    if (!window.confirm(`Delete "${doc.filename}"?`)) return
     try {
       await api.delete(`/documents/${doc.id}`)
-      setFiles(p => p.filter(f => f.id !== doc.id))
       setProjects(p => p.filter(f => f.id !== doc.id))
       setPendingFiles(p => p.filter(f => f.id !== doc.id))
     } catch (e) {
-      alert('Failed to delete document: ' + (e.response?.data?.detail || e.message))
+      alert('Failed to delete document')
     }
-  }
-
-  const removePendingFile = (file) => {
-    setPendingFiles(p => p.filter(f => (f.id || f.name) !== (file.id || file.name)))
   }
 
   const triggerFileUpload = () => fileInputRef.current?.click()
   
-  const activeDoc = files.find(f => f.id === project?.id)
-  
-  // FIXED: Only disable input if the ACTIVE document is processing, or if a global search has no active project and something is uploading
+  const activeDoc = projects.find(f => f.id === project?.id)
   const isProcessing = activeDoc ? (activeDoc.status === 'processing' || activeDoc.status === 'uploading') : pendingFiles.length > 0
   const hasError = activeDoc?.status === 'error'
 
-  // ── Home screen (project=null) ──
-  if (!project) {
-    return (
-      <>
-        <input ref={fileInputRef} type="file" accept=".pdf,.docx,.doc" style={{ display: 'none' }}
-          onChange={e => { const f = e.target.files[0]; if (f) handleUpload(f); e.target.value = '' }} />
-        <HomeScreen
-          input={input}
-          setInput={setInput}
-          onSend={sendMessage}
-          onUploadClick={triggerFileUpload}
-          pendingFiles={pendingFiles}
-          onRemoveFile={removePendingFile}
-          sending={sending}
-          disabled={isProcessing}
-          messages={messages}
-          setMessages={setMessages}
-          messagesEndRef={messagesEndRef}
-          handleClearChat={handleClearChat}
-          handleDeleteMessage={handleDeleteMessage}
-        />
-        {showFiles && (
-          <FilesPanel
-            files={files}
-            onUpload={handleUpload}
-            onUploadClick={triggerFileUpload}
-            uploading={uploading}
-            dragOver={dragOver}
-            setDragOver={setDragOver}
-            onClose={() => setShowFiles(false)}
-            onDelete={handleDeleteDocument}
-          />
-        )}
-      </>
-    )
-  }
-
-  // ── Chat screen ──
-  const projectName = project?.filename || project?.name || 'New Chat'
+  const projectName = project?.filename || project?.name || 'General Chat'
 
   return (
     <>
       <input ref={fileInputRef} type="file" accept=".pdf,.docx,.doc" style={{ display: 'none' }}
         onChange={e => { const f = e.target.files[0]; if (f) handleUpload(f); e.target.value = '' }} />
+      
       <div className="main-area">
         {/* Topbar */}
         <div className="topbar">
@@ -672,21 +214,33 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
           </div>
         </div>
 
-        {/* Chat messages */}
+        {/* Chat Area */}
         <div className="chat-area">
-          {messages.length === 0 ? (
-            <div className="chat-empty">
-              <div className="chat-empty-icon"></div>
-              <p>Discuss the files in this project</p>
-              <p style={{ fontSize: '0.78rem', color: '#bbb' }}>Upload a contract to get started</p>
-              {hasError && (
-                <div style={{ marginTop: 20, color: '#d63031', fontSize: '0.85rem', maxWidth: 400 }}>
-                  There was an error processing this document. Check the files panel for details.
-                </div>
-              )}
+          {!project && messages.length === 0 ? (
+            <div className="home-screen">
+              <h1 className="home-greeting">{getGreeting()} {user?.name || 'there'}, let's get to work</h1>
+              <div className="home-input-box">
+                <ChatInput 
+                  input={input} setInput={setInput} onSend={() => sendMessage()} 
+                  onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
+                  onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
+                  sending={sending} disabled={isProcessing} idPrefix="home"
+                />
+              </div>
+              <div className="home-footer">
+                <Icon.Lock /> Your data is secure and private
+              </div>
             </div>
           ) : (
             <div className="messages-wrapper">
+              {messages.length === 0 && (
+                <div className="chat-empty">
+                  <div className="chat-empty-icon">📁</div>
+                  <p>Discuss the files in this project</p>
+                  <p style={{ fontSize: '0.78rem', color: '#bbb' }}>Upload a contract to get started</p>
+                  {hasError && <div style={{ marginTop: 20, color: '#d63031' }}>Error processing document.</div>}
+                </div>
+              )}
               {messages.map(msg =>
                 msg.role === 'user'
                   ? <UserMessage key={msg.id} id={msg.id} text={msg.text} onDelete={handleDeleteMessage} />
@@ -696,7 +250,7 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
                 <div className="msg-ai">
                   <div className="thinking-block" style={{ pointerEvents: 'none' }}>
                     <div className="thinking-toggle" style={{ cursor: 'default' }}>
-                      <span className="thinking-dot-anim">●</span>
+                      <span className="thinking-dot-anim"></span>
                       <span>Thinking…</span>
                     </div>
                   </div>
@@ -709,35 +263,26 @@ export default function ChatPage({ project, setProject, projects, setProjects, o
 
         {/* Input area */}
         <div className="chat-input-wrapper">
+          <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} />
           <ChatInput 
-            input={input} 
-            setInput={setInput} 
-            onSend={sendMessage} 
-            onUploadClick={triggerFileUpload}
-            pendingFiles={pendingFiles}
-            onRemoveFile={removePendingFile}
-            sending={sending}
-            disabled={isProcessing || hasError}
-            placeholder={hasError ? "Document processing failed. Send it again or try another." : undefined}
+            input={input} setInput={setInput} onSend={() => sendMessage()} 
+            onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
+            onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
+            sending={sending} disabled={isProcessing || hasError}
             idPrefix="chat"
           />
         </div>
 
         <div className="bottom-privacy">
-          <Icon.Lock /> {hasError ? "Processing failed. Please check file errors." : "Your data is secure and private"}
+          <Icon.Lock /> {hasError ? "Processing failed. Check file errors." : "Your data is secure and private"}
         </div>
       </div>
 
       {showFiles && (
         <FilesPanel
-          files={files}
-          onUpload={handleUpload}
-          onUploadClick={triggerFileUpload}
-          uploading={uploading}
-          dragOver={dragOver}
-          setDragOver={setDragOver}
-          onClose={() => setShowFiles(false)}
-          onDelete={handleDeleteDocument}
+          files={projects} onUpload={handleUpload} onUploadClick={triggerFileUpload}
+          uploading={uploading} dragOver={dragOver} setDragOver={setDragOver}
+          onClose={() => setShowFiles(false)} onDelete={handleDeleteDocument}
         />
       )}
     </>

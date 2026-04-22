@@ -247,7 +247,7 @@ class Subscription(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    organization = relationship("Organization", back_ref="subscription", uselist=False)
+    organization = relationship("Organization", backref="subscription", uselist=False)
 
 
 class UsageRecord(Base):

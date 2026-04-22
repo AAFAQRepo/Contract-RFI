@@ -143,7 +143,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
                 onClick={() => { 
                   localStorage.setItem('forceHistory', 'true');
                   setActiveProject(p); 
-                  setActiveChatSession(null); 
+                  setActiveConversationId(null); 
                   navigate('/chat');
                 }}
                 id={`project-${p.id}`}
@@ -158,7 +158,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           </div>
         </>
       )}
-      {projects.length === 0 && chatSessions.length === 0 && <div style={{ flex: 1 }} />}
+      {projects.length === 0 && conversations.length === 0 && <div style={{ flex: 1 }} />}
 
       {ctxMenu && (
         <>

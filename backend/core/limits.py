@@ -44,7 +44,7 @@ async def get_current_usage(org_id: str, db: AsyncSession) -> UsageRecord:
         await db.refresh(usage)
     return usage
 
-async def check_usage_limit(resource: str):
+def check_usage_limit(resource: str):
     """
     FastAPI dependency factory. 
     Usage: Depends(check_usage_limit("documents"))

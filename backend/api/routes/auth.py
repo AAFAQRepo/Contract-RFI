@@ -1,7 +1,8 @@
+from uuid import UUID
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from jose import jwt, JWTError
@@ -36,10 +37,12 @@ class TokenRefreshRequest(BaseModel):
     refresh_token: str
 
 class UserResponse(BaseModel):
-    id: str
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: UUID
     email: str
-    name: Optional[str]
-    company: Optional[str]
+    name: Optional[str] = None
+    company: Optional[str] = None
     role: str
     is_verified: bool
     onboarding_completed: bool

@@ -51,7 +51,6 @@ def upgrade() -> None:
     op.alter_column('chats', 'chat_session_id', new_column_name='conversation_id')
     op.drop_index('idx_chats_user_session', table_name='chats')
     op.create_index('idx_chats_conv_id', 'chats', ['conversation_id'], unique=False)
-    op.create_index('idx_chats_user_document', 'chats', ['user_id', 'document_id'], unique=False)
 
     # 4. Create onboarding_responses table
     op.create_table(

@@ -3,6 +3,7 @@ import api from '../api/client'
 import { Icon } from '../components/common/Icon'
 import { useAuth } from '../contexts/AuthContext'
 import { useProjects } from '../contexts/ProjectContext'
+import { useSubscription } from '../contexts/SubscriptionContext'
 import ChatInput from '../components/chat/ChatInput'
 import { UserMessage, AIMessage } from '../components/chat/ChatMessages'
 import { FilesPanel } from '../components/documents/FilesPanel'
@@ -21,8 +22,10 @@ export default function ChatPage() {
   const { 
     activeProject: project, setActiveProject: setProject, 
     projects, setProjects, 
-    fetchProjects, fetchChatSessions 
+    fetchProjects, conversations, fetchConversations,
+    activeConversationId, setActiveConversationId
   } = useProjects()
+  const { refreshUsage } = useSubscription()
 
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -46,16 +49,20 @@ export default function ChatPage() {
     return () => clearInterval(interval)
   }, [projects, fetchProjects])
 
-  // Load chat history when project changes
+  // Load chat history when project or conversation changes
   useEffect(() => {
     setMessages([])
     
-    const isGlobal = !project || String(project.id).startsWith('temp-')
-    const docId = isGlobal ? 'global' : project.id
+    const isGlobal = (!project || String(project.id).startsWith('temp-')) && !activeConversationId
+    const docId = project?.id && !String(project.id).startsWith('temp-') ? project.id : null
 
     if (isGlobal && !localStorage.getItem('forceHistory')) return
 
-    api.get(`/chat/history?document_id=${docId}`)
+    const url = activeConversationId 
+      ? `/chat/history?conversation_id=${activeConversationId}`
+      : `/chat/history?document_id=${docId || 'global'}`
+
+    api.get(url)
       .then(r => {
         const flattened = []
         r.data.forEach(c => {
@@ -65,7 +72,7 @@ export default function ChatPage() {
         setMessages(flattened)
       })
       .catch(err => console.error('Failed to load history', err))
-  }, [project?.id])
+  }, [project?.id, activeConversationId])
 
   const sendMessage = async (overrideInput) => {
     const text = (overrideInput || input).trim()
@@ -89,7 +96,8 @@ export default function ChatPage() {
         },
         body: JSON.stringify({
           query: text,
-          document_id: currentDocId
+          document_id: currentDocId,
+          conversation_id: activeConversationId
         })
       })
 
@@ -132,7 +140,8 @@ export default function ChatPage() {
         ))
       }
 
-      fetchChatSessions()
+      fetchConversations()
+      refreshUsage()
 
     } catch (err) {
       console.error('Streaming error:', err)

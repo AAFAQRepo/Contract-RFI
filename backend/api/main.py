@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.clients import init_minio, init_qdrant, init_redis
-from api.routes import documents, chat, review, health, retrieval, auth
+from api.routes import documents, chat, review, health, retrieval, auth, billing, workspace
 from core.auth import get_password_hash
 
 from sqlalchemy import text
@@ -65,3 +65,5 @@ app.include_router(documents.router, prefix="/api/documents", tags=["Documents"]
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(review.router, prefix="/api/review", tags=["Review"])
 app.include_router(retrieval.router, prefix="/api", tags=["Retrieval"])
+app.include_router(billing.router, prefix="/api/billing", tags=["Billing"])
+app.include_router(workspace.router, prefix="/api/workspace", tags=["Workspace"])

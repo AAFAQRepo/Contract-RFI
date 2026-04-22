@@ -20,6 +20,19 @@ export function AuthProvider({ children }) {
     return userData
   }, [])
 
+  const fetchUser = useCallback(async () => {
+    try {
+      const res = await api.get('/auth/me')
+      const userData = res.data
+      localStorage.setItem('user', JSON.stringify(userData))
+      setUser(userData)
+      return userData
+    } catch (err) {
+      console.error('Failed to fetch user', err)
+      return null
+    }
+  }, [])
+
   const logout = useCallback(() => {
     localStorage.removeItem('token')
     localStorage.removeItem('refresh_token')
@@ -32,7 +45,7 @@ export function AuthProvider({ children }) {
   const isAuthenticated = !!token
 
   return (
-    <AuthContext.Provider value={{ token, user, isAuthenticated, login, logout }}>
+    <AuthContext.Provider value={{ token, user, isAuthenticated, login, logout, fetchUser }}>
       {children}
     </AuthContext.Provider>
   )

@@ -6,6 +6,8 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useProjects } from '../../contexts/ProjectContext'
 import api from '../../api/client'
 
+import UsageMeter from '../subscription/UsageMeter'
+
 export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
   const [showAccount, setShowAccount] = useState(false)
   const [ctxMenu, setCtxMenu] = useState(null)
@@ -13,7 +15,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
   const { user, logout } = useAuth()
   const { 
     projects, setProjects, activeProject, setActiveProject, 
-    chatSessions, activeChatSession, setActiveChatSession,
+    conversations, activeConversationId, setActiveConversationId,
     resetForNewProject 
   } = useProjects()
 
@@ -81,7 +83,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
       <div 
         className="sidebar-logo" 
         style={{ marginBottom: 6, cursor: 'pointer' }}
-        onClick={() => { setActiveProject(null); setActiveChatSession(null); navigate('/') }}
+        onClick={() => { setActiveProject(null); setActiveConversationId(null); navigate('/') }}
       >
         <Logo />
         <span className="sidebar-logo-text">Contract RFI</span>
@@ -105,38 +107,27 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
         </button>
       </div>
 
-      {chatSessions.length > 0 && (
+      {conversations.length > 0 && (
         <>
-          <div className="sidebar-section-label">Chats</div>
+          <div className="sidebar-section-label">Conversations</div>
           <div style={{ overflowY: 'auto', maxHeight: 200, padding: '0 0 4px' }}>
-            {chatSessions.map(session => {
-              const isActive = session.is_global
-                ? !activeProject && activeChatSession === 'global'
-                : activeProject?.id === session.document_id
-              return (
-                <div
-                  key={session.document_id || 'global'}
-                  className={`sidebar-project-item ${isActive ? 'active' : ''}`}
-                  onClick={() => {
-                    localStorage.setItem('forceHistory', 'true')
-                    if (session.is_global) {
-                      setActiveProject(null)
-                      setActiveChatSession('global')
-                      navigate('/')
-                    } else {
-                      const doc = projects.find(p => p.id === session.document_id)
-                      if (doc) { setActiveProject(doc); navigate('/chat') }
-                    }
-                  }}
-                  title={session.title}
-                >
-                  <span className="sidebar-project-name" style={{ color: session.is_global ? 'var(--text-secondary)' : undefined }}>
-                    {session.title}
-                  </span>
-                  <span style={{ fontSize: '0.68rem', color: '#999', marginLeft: 4, flexShrink: 0 }}>{session.message_count}</span>
-                </div>
-              )
-            })}
+            {conversations.map(conv => (
+              <div
+                key={conv.id}
+                className={`sidebar-project-item ${activeConversationId === conv.id ? 'active' : ''}`}
+                onClick={() => {
+                  localStorage.setItem('forceHistory', 'true')
+                  setActiveProject(null)
+                  setActiveConversationId(conv.id)
+                  navigate('/')
+                }}
+                title={conv.title}
+              >
+                <span className="sidebar-project-name">
+                  {conv.title}
+                </span>
+              </div>
+            ))}
           </div>
         </>
       )}
@@ -152,7 +143,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
                 onClick={() => { 
                   localStorage.setItem('forceHistory', 'true');
                   setActiveProject(p); 
-                  setActiveChatSession(null); 
+                  setActiveConversationId(null); 
                   navigate('/chat');
                 }}
                 id={`project-${p.id}`}
@@ -167,7 +158,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           </div>
         </>
       )}
-      {projects.length === 0 && chatSessions.length === 0 && <div style={{ flex: 1 }} />}
+      {projects.length === 0 && conversations.length === 0 && <div style={{ flex: 1 }} />}
 
       {ctxMenu && (
         <>
@@ -181,6 +172,8 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
         </>
       )}
 
+      {!collapsed && <UsageMeter />}
+      
       <div className="sidebar-bottom">
         <button className="sidebar-nav-item"><Icon.Help /> Help</button>
         <div style={{ position: 'relative' }}>

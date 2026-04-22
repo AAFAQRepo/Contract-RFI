@@ -134,11 +134,26 @@ class Review(Base):
     document = relationship("Document", back_populates="review")
 
 
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", backref="conversations")
+    messages = relationship("Chat", back_populates="conversation", cascade="all, delete-orphan")
+
+
 class Chat(Base):
     __tablename__ = "chats"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True)
     query = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)
@@ -151,10 +166,12 @@ class Chat(Base):
 
     # Relationships
     user = relationship("User", back_populates="chats")
+    conversation = relationship("Conversation", back_populates="messages")
     document = relationship("Document", back_populates="chats")
 
     __table_args__ = (
         Index("idx_chats_user_document", "user_id", "document_id"),
+        Index("idx_chats_conv_id", "conversation_id"),
         Index("idx_chats_created_at", "created_at"),
     )
 
@@ -212,3 +229,40 @@ class OnboardingResponse(Base):
 
     # Relationships
     user = relationship("User", back_populates="onboarding_response")
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True)
+    stripe_customer_id = Column(String, nullable=True)
+    stripe_subscription_id = Column(String, nullable=True)
+    plan = Column(String, nullable=False, default="free")  # free, pro, enterprise
+    status = Column(String, nullable=False, default="active")  # active, past_due, canceled
+    current_period_start = Column(DateTime, nullable=True)
+    current_period_end = Column(DateTime, nullable=True)
+    cancel_at_period_end = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    organization = relationship("Organization", backref="subscription", uselist=False)
+
+
+class UsageRecord(Base):
+    __tablename__ = "usage_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    period_start = Column(DateTime, nullable=False) # Start of month
+    documents_used = Column(Integer, default=0)
+    queries_used = Column(Integer, default=0)
+    storage_bytes_used = Column(BigInteger, default=0)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_usage_org_period", "org_id", "period_start"),
+    )

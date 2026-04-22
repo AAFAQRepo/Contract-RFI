@@ -16,6 +16,8 @@ from core.auth import get_current_user
 from models.models import Document, Chunk, User
 from services.storage import upload_document, build_object_name
 
+from core.limits import check_usage_limit, increment_usage
+
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc"}
@@ -27,6 +29,7 @@ async def upload_document_endpoint(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _limit: bool = Depends(check_usage_limit("documents")),
 ):
     """Upload a contract document. Stores in MinIO, queues Celery processing."""
     # Validate extension
@@ -74,6 +77,9 @@ async def upload_document_endpoint(
     )
     db.add(doc)
     await db.commit()
+
+    # Increment usage
+    await increment_usage(current_user.org_id, "documents", db)
 
     # Enqueue Celery task
     from workers.celery_app import process_document

@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Logo } from '../components/common/Icon'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function LoginPage() {
@@ -18,7 +17,7 @@ export default function LoginPage() {
 
     try {
       await login(email, password)
-      navigate('/')
+      navigate('/dashboard')
     } catch (err) {
       setError(err.response?.data?.detail || 'Login failed. Please check your credentials.')
     } finally {
@@ -27,22 +26,20 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="login-page">
-      <div className="login-card">
-        <div className="login-header">
-          <Logo />
-          <h1 className="login-title">Contract RFI</h1>
-          <p className="login-subtitle">Sign in to your account</p>
-        </div>
+    <div className="auth-single-container">
+      <div className="auth-header-top">
+        <h1 className="auth-title">Welcome!</h1>
+      </div>
 
-        <form className="login-form" onSubmit={handleLogin}>
+      <div className="auth-form-card">
+        <form className="auth-form" onSubmit={handleLogin}>
           <div className="form-group">
-            <label>Email Address</label>
+            <label>Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="name@company.com"
+              placeholder="Your email address"
               required
             />
           </div>
@@ -58,17 +55,27 @@ export default function LoginPage() {
             />
           </div>
 
-          {error && <div className="login-error">⚠️ {error}</div>}
+          {error && <div className="login-error" style={{ color: '#ff5252', fontSize: '0.85rem', marginBottom: '16px' }}>⚠️ {error}</div>}
 
-          <button className="login-submit" type="submit" disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign In'}
+          <button className="btn-continue" type="submit" disabled={loading}>
+            {loading ? 'Processing...' : 'Continue'}
           </button>
-        </form>
 
-        <div className="login-footer">
-          <p>Don't have an account? <Link to="/register">Create one</Link></p>
-        </div>
+          <div className="divider">
+            <span>OR</span>
+          </div>
+
+          <button type="button" className="btn-social">
+            <img src="https://www.gstatic.com/images/branding/product/1x/gsa_512dp.png" width="20" alt="" />
+            Continue with Google
+          </button>
+
+          <div className="auth-footer">
+            <p>Don't have an account? <Link to="/register">Sign up</Link></p>
+          </div>
+        </form>
       </div>
     </div>
   )
 }
+

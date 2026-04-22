@@ -11,9 +11,9 @@ import ChatPage from './pages/ChatPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
-import OnboardingWizard from './pages/onboarding/OnboardingWizard'
-import BillingPage from './pages/BillingPage'
+import LandingPage from './pages/LandingPage'
 import DashboardPage from './pages/DashboardPage'
+import BillingPage from './pages/BillingPage'
 import SettingsPage from './pages/SettingsPage'
 import './index.css'
 import './App.css'
@@ -28,6 +28,8 @@ export default function App() {
             <BrowserRouter>
           <Routes>
             {/* Public Routes */}
+            <Route path="/" element={<LandingPage />} />
+            
             <Route element={<AuthLayout />}>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
@@ -37,7 +39,7 @@ export default function App() {
             {/* Protected Routes */}
             <Route element={<ProtectedRoute />}>
               <Route element={<AppLayout />}>
-                <Route path="/" element={<DashboardPage />} />
+                <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/billing" element={<BillingPage />} />
                 <Route path="/settings" element={<SettingsPage />} />

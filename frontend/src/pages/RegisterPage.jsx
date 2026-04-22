@@ -1,39 +1,131 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Logo, Icon } from '../components/common/Icon'
 import api from '../api/client'
 
 export default function RegisterPage() {
+  const [step, setStep] = useState(1)
   const [formData, setFormData] = useState({
     email: '',
-    password: 'password_auto_gen', // Simplified for the 'Continue' flow
+    password: '',
     firstName: '',
     lastName: ''
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const navigate = useNavigate()
+
+  const handleNextStep = (e) => {
+    e.preventDefault()
+    if (!formData.firstName || !formData.lastName || !formData.email) {
+      setError('Please fill out all fields.')
+      return
+    }
+    setError('')
+    setStep(2)
+  }
 
   const handleRegister = async (e) => {
     e.preventDefault()
+    if (!formData.password) {
+      setError('Please create a password.')
+      return
+    }
     setLoading(true)
     setError('')
 
     try {
-      // In a real flow, this 'Continue' might just be the first step
-      // For now, we'll fulfill the registration
       await api.post('/auth/register', {
         email: formData.email,
         password: formData.password,
         name: `${formData.firstName} ${formData.lastName}`.trim(),
         company: 'Individual' // Default for now
       })
-      navigate('/dashboard')
+      navigate('/login')
     } catch (err) {
       setError(err.response?.data?.detail || 'Registration failed. Please try again.')
     } finally {
       setLoading(false)
     }
+  }
+
+  if (step === 2) {
+    return (
+      <div className="auth-single-container">
+        <div className="auth-header-top">
+          <div className="gem-logo">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L22 10H2L12 2Z" fill="#ff7043"/>
+              <path d="M22 10L12 22L2 10H22Z" fill="#00bcd4"/>
+              <path d="M12 2L17 10H7L12 2Z" fill="#ffa726"/>
+              <path d="M17 10L12 22L7 10H17Z" fill="#29b6f6"/>
+            </svg>
+          </div>
+          <h1 className="auth-title">Create your Account</h1>
+        </div>
+
+        <div className="auth-form-card">
+          <form className="auth-form" onSubmit={handleRegister}>
+            <div className="form-group">
+              <label>Email</label>
+              <input
+                type="email"
+                value={formData.email}
+                disabled
+                style={{ color: '#888', background: '#222' }}
+              />
+            </div>
+
+            <div className="form-group" style={{ position: 'relative' }}>
+              <label>Password</label>
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Create a password"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                required
+                autoFocus
+                style={{ paddingRight: '40px' }}
+              />
+              <button 
+                type="button" 
+                onClick={() => setShowPassword(!showPassword)}
+                style={{ position: 'absolute', right: '12px', top: '34px', background: 'none', border: 'none', color: '#888', cursor: 'pointer', padding: 0 }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+              </button>
+            </div>
+
+            {error && <div className="login-error" style={{ color: '#ff5252', fontSize: '0.85rem', marginBottom: '16px' }}>⚠️ {error}</div>}
+
+            <button className="btn-continue" type="submit" disabled={loading}>
+              {loading ? 'Creating Account...' : 'Continue'}
+            </button>
+
+            <div className="divider">
+              <span>OR</span>
+            </div>
+
+            <button type="button" className="btn-social">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}>
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                <polyline points="22,6 12,13 2,6"></polyline>
+              </svg>
+              Continue with email code
+            </button>
+          </form>
+        </div>
+        
+        <div style={{ marginTop: '24px' }}>
+            <button type="button" onClick={() => setStep(1)} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                &lt; Go back
+            </button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -44,7 +136,7 @@ export default function RegisterPage() {
         </div>
 
         <div className="auth-form-card">
-          <form className="auth-form" onSubmit={handleRegister}>
+          <form className="auth-form" onSubmit={handleNextStep}>
             <div className="form-row">
               <div className="form-group">
                 <label>First name</label>
@@ -79,8 +171,10 @@ export default function RegisterPage() {
               />
             </div>
 
-            <button className="btn-continue" type="submit" disabled={loading}>
-              {loading ? 'Processing...' : 'Continue'}
+            {error && <div className="login-error" style={{ color: '#ff5252', fontSize: '0.85rem', marginBottom: '16px' }}>⚠️ {error}</div>}
+
+            <button className="btn-continue" type="submit">
+              Continue
             </button>
 
             <div className="divider">

@@ -16,6 +16,20 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+let isRefreshing = false
+let failedQueue = []
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error)
+    } else {
+      prom.resolve(token)
+    }
+  })
+  failedQueue = []
+}
+
 // Response interceptor: handle 401 with Refresh Token
 api.interceptors.response.use(
   (response) => response,
@@ -23,30 +37,45 @@ api.interceptors.response.use(
     const originalRequest = error.config
 
     if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true
-      const refreshToken = localStorage.getItem('refresh_token')
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject })
+        })
+          .then((token) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`
+            return api(originalRequest)
+          })
+          .catch((err) => Promise.reject(err))
+      }
 
+      originalRequest._retry = true
+      isRefreshing = true
+
+      const refreshToken = localStorage.getItem('refresh_token')
       if (refreshToken) {
         try {
           const res = await axios.post('/api/auth/refresh', { refresh_token: refreshToken })
           const { access_token } = res.data
           localStorage.setItem('token', access_token)
+          
+          processQueue(null, access_token)
+          isRefreshing = false
+
           originalRequest.headers.Authorization = `Bearer ${access_token}`
           return api(originalRequest)
         } catch (refreshError) {
-          // Refresh failed - log out
+          processQueue(refreshError, null)
+          isRefreshing = false
+          
           localStorage.clear()
-          const publicRoutes = ['/', '/login', '/register', '/forgot-password']
-          if (!publicRoutes.includes(window.location.pathname)) {
+          if (!['/', '/login', '/register'].includes(window.location.pathname)) {
             window.location.href = '/login'
           }
           return Promise.reject(refreshError)
         }
       } else {
-        // No refresh token - log out
         localStorage.clear()
-        const publicRoutes = ['/', '/login', '/register', '/forgot-password']
-        if (!publicRoutes.includes(window.location.pathname)) {
+        if (!['/', '/login', '/register'].includes(window.location.pathname)) {
           window.location.href = '/login'
         }
       }

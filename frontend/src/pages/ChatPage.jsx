@@ -98,6 +98,7 @@ export default function ChatPage() {
     if (!text || sending) return
 
     setInput('')
+    setPendingFiles([])
     setMessages(m => [...m, { id: Date.now(), role: 'user', text }])
     setSending(true)
 

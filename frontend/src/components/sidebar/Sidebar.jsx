@@ -6,7 +6,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useProjects } from '../../contexts/ProjectContext'
 import api from '../../api/client'
 
-import UsageMeter from '../subscription/UsageMeter'
+
 
 export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
   const [showAccount, setShowAccount] = useState(false)
@@ -172,7 +172,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
         </>
       )}
 
-      {!collapsed && <UsageMeter />}
+      
       
       <div className="sidebar-bottom">
         <button className="sidebar-nav-item"><Icon.Help /> Help</button>

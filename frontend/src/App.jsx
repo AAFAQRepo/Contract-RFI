@@ -12,7 +12,7 @@ import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import LandingPage from './pages/LandingPage'
-import BillingPage from './pages/BillingPage'
+
 import SettingsPage from './pages/SettingsPage'
 import './index.css'
 import './App.css'
@@ -35,7 +35,7 @@ function AppRoutes() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route path="/chat" element={<ChatPage />} />
-          <Route path="/billing" element={<BillingPage />} />
+
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>

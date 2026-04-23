@@ -1,54 +1,30 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react'
-import api from '../api/client'
-import { useAuth } from './AuthContext'
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import api from '../api/client';
 
-const SubscriptionContext = createContext(null)
+const SubscriptionContext = createContext();
 
-export function SubscriptionProvider({ children }) {
-  const { isAuthenticated } = useAuth()
-  const [subscription, setSubscription] = useState(null)
-  const [usage, setUsage] = useState(null)
-  const [loading, setLoading] = useState(false)
+export const useSubscription = () => useContext(SubscriptionContext);
 
-  const fetchSubscriptionData = useCallback(async () => {
-    if (!isAuthenticated) return
-    setLoading(true)
-    try {
-      const [subRes, usageRes] = await Promise.all([
-        api.get('/billing/subscription'),
-        api.get('/billing/usage')
-      ])
-      setSubscription(subRes.data)
-      setUsage(usageRes.data.usage)
-    } catch (err) {
-      console.error('Failed to load subscription data', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [isAuthenticated])
-
-  useEffect(() => {
-    fetchSubscriptionData()
-  }, [fetchSubscriptionData])
+export const SubscriptionProvider = ({ children }) => {
+  const [usage, setUsage] = useState({ documents: 0, queries: 0, limit: 5 });
+  const [plan, setPlan] = useState('free');
 
   const refreshUsage = useCallback(async () => {
     try {
-      const res = await api.get('/billing/usage')
-      setUsage(res.data.usage)
-    } catch {}
-  }, [])
+      const res = await api.get('/workspace/usage');
+      setUsage(res.data);
+    } catch (err) {
+      console.error('Failed to fetch usage', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshUsage();
+  }, [refreshUsage]);
 
   return (
-    <SubscriptionContext.Provider value={{
-      subscription, usage, loading, fetchSubscriptionData, refreshUsage
-    }}>
+    <SubscriptionContext.Provider value={{ subscription: { usage, plan }, refreshUsage }}>
       {children}
     </SubscriptionContext.Provider>
-  )
-}
-
-export function useSubscription() {
-  const ctx = useContext(SubscriptionContext)
-  if (!ctx) throw new Error('useSubscription must be used within SubscriptionProvider')
-  return ctx
-}
+  );
+};

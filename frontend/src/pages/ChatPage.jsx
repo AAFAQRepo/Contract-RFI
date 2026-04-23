@@ -285,17 +285,19 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Input area */}
-        <div className="chat-input-wrapper">
-          <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} />
-          <ChatInput 
-            input={input} setInput={setInput} onSend={() => sendMessage()} 
-            onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
-            onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
-            sending={sending} disabled={isProcessing || hasError}
-            idPrefix="chat"
-          />
-        </div>
+        {/* Input area - only show if there's an active project or messages */}
+        {(project || messages.length > 0) && (
+          <div className="chat-input-wrapper">
+            <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} />
+            <ChatInput 
+              input={input} setInput={setInput} onSend={() => sendMessage()} 
+              onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
+              onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
+              sending={sending} disabled={isProcessing || hasError}
+              idPrefix="chat"
+            />
+          </div>
+        )}
 
         <div className="bottom-privacy">
           <Icon.Lock /> {hasError ? "Processing failed. Check file errors." : "Your data is secure and private"}

@@ -1547,7 +1547,7 @@ body:has(.auth-single-container)::-webkit-scrollbar {
   background: transparent;
   color: #616161;
   font-size: 0.9rem;
-  font-weight: 500;
+  font-weight: 400; /* Unbolded */
   cursor: pointer;
   border-radius: 12px;
   transition: all 0.2s;
@@ -1604,7 +1604,7 @@ body:has(.auth-single-container)::-webkit-scrollbar {
   border-radius: 14px;
   color: #424242;
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500; /* Changed from 600 */
   cursor: pointer;
   transition: all 0.2s;
 }

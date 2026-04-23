@@ -419,57 +419,89 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   gap: 8px;
   padding: 12px 16px 0;
 }
-.file-chip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  font-size: 0.78rem;
-  color: var(--text);
-}
-.file-chip-remove {
-  border: none;
-  background: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  padding: 2px;
-}
-.file-chip-remove:hover { color: var(--text); }
-
-/* Progress ring on file chips */
-.file-chip-icon-wrapper {
+.file-chip-modern {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  flex-shrink: 0;
+  gap: 12px;
+  padding: 8px 16px 8px 8px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  margin-right: 8px;
+  margin-bottom: 8px;
 }
+
+.file-chip-modern-icon {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.file-chip-modern-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 150px;
+}
+
+.file-chip-modern-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.file-chip-modern-type {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #6b7280;
+  margin-top: 2px;
+  line-height: 1;
+}
+
+.file-chip-modern-close {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  transition: transform 0.15s ease;
+}
+
+.file-chip-modern-close:hover {
+  transform: scale(1.05);
+}
+
 .file-progress-ring {
   position: absolute;
-  top: 0;
-  left: 0;
-  transform: rotate(-90deg);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-90deg);
 }
+
 .file-progress-arc {
   transition: stroke-dashoffset 0.4s ease;
-}
-.file-chip-pct {
-  position: absolute;
-  bottom: -12px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 0.6rem;
-  font-weight: 600;
-  color: #4caf50;
-  white-space: nowrap;
-  pointer-events: none;
 }
 
 .chat-input-textarea {

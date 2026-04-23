@@ -1,9 +1,9 @@
 import { useRef } from 'react'
 import { Icon } from '../common/Icon'
 
-/* Circular progress ring around the file icon */
+/* Circular progress ring for the new modern design */
 function ProcessingRing({ progress = 0 }) {
-  const radius = 18
+  const radius = 12
   const stroke = 2.5
   const normalizedRadius = radius - stroke
   const circumference = 2 * Math.PI * normalizedRadius
@@ -15,19 +15,17 @@ function ProcessingRing({ progress = 0 }) {
       width={radius * 2}
       height={radius * 2}
     >
-      {/* Background track */}
       <circle
-        stroke="#e0e0e0"
+        stroke="rgba(255,255,255,0.3)"
         fill="transparent"
         strokeWidth={stroke}
         r={normalizedRadius}
         cx={radius}
         cy={radius}
       />
-      {/* Progress arc */}
       <circle
         className="file-progress-arc"
-        stroke="#4caf50"
+        stroke="#ffffff"
         fill="transparent"
         strokeWidth={stroke}
         strokeLinecap="round"
@@ -43,27 +41,31 @@ function ProcessingRing({ progress = 0 }) {
 
 function FileChip({ file, onRemove }) {
   const ext = (file.filename || file.name || '').split('.').pop()?.toLowerCase()
-  const colors = { pdf: '#e53935', docx: '#1e88e5', doc: '#1e88e5' }
-  const bg = colors[ext] || '#757575'
+  const colors = { pdf: '#ef4444', docx: '#3b82f6', doc: '#3b82f6' }
+  const bg = colors[ext] || '#6b7280'
   const label = ext?.toUpperCase().slice(0, 3) || 'DOC'
   const isProcessing = file.status === 'uploading' || file.status === 'processing'
   const progress = file.progress ?? 0
 
   return (
-    <div className="file-chip">
-      <div className="file-chip-icon-wrapper">
-        <div className="file-card-icon" style={{ background: bg, width: 24, height: 24, fontSize: '0.55rem' }}>{label}</div>
-        {isProcessing && (
-          <>
-            <ProcessingRing progress={progress} />
-            <span className="file-chip-pct">{progress}%</span>
-          </>
+    <div className="file-chip-modern">
+      <div className="file-chip-modern-icon" style={{ background: bg }}>
+        {isProcessing ? (
+          <ProcessingRing progress={progress} />
+        ) : (
+          <span>{label}</span>
         )}
       </div>
-      <span>{file.filename || file.name}</span>
-      {!isProcessing && (
-        <button className="file-chip-remove" onClick={onRemove}><Icon.Close /></button>
-      )}
+      <div className="file-chip-modern-info">
+        <span className="file-chip-modern-name">{file.filename || file.name}</span>
+        <span className="file-chip-modern-type">{label}</span>
+      </div>
+      <button className="file-chip-modern-close" onClick={onRemove}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+          <circle cx="12" cy="12" r="10" stroke="#e5e7eb" strokeWidth="1" />
+          <path d="M15 9l-6 6M9 9l6 6" stroke="#111827" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
     </div>
   )
 }

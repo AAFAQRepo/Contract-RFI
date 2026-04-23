@@ -107,6 +107,7 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface
+      - /home/ubuntu/.cache/docling:/root/.cache/docling
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health >/dev/null || exit 1"]
       interval: 20s
@@ -155,6 +156,7 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     volumes:
       - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface
+      - /home/ubuntu/.cache/docling:/root/.cache/docling
     deploy:
       resources:
         reservations:

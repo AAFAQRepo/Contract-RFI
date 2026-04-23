@@ -156,19 +156,86 @@ export default function ChatPage() {
   }
 
   const handleUpload = async (file) => {
-    const tempFile = { id: `uploading-${Date.now()}`, filename: file.name, status: 'uploading' }
+    const tempId = `uploading-${Date.now()}`
+    const tempFile = { id: tempId, filename: file.name, status: 'uploading', progress: 0 }
     setPendingFiles(p => [...p, tempFile])
     setUploading(true)
+
     const form = new FormData()
     form.append('file', file)
+
     try {
-      const r = await api.post('/documents/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })
-      const newDoc = { id: r.data.document_id, filename: r.data.filename || file.name, status: 'processing', size_mb: r.data.size_mb }
-      setPendingFiles(p => p.map(f => f.id === tempFile.id ? newDoc : f))
+      // Use XMLHttpRequest so we get real upload progress
+      const token = localStorage.getItem('token')
+      const uploadResult = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', `${api.defaults.baseURL}/documents/upload`)
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            // Upload counts as first 60% of the overall progress
+            const pct = Math.round((e.loaded / e.total) * 60)
+            setPendingFiles(p => p.map(f => f.id === tempId ? { ...f, progress: pct } : f))
+          }
+        }
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(JSON.parse(xhr.responseText))
+          } else {
+            reject(new Error(`Upload failed: ${xhr.status}`))
+          }
+        }
+        xhr.onerror = () => reject(new Error('Network error'))
+        xhr.send(form)
+      })
+
+      const newDoc = {
+        id: uploadResult.document_id,
+        filename: uploadResult.filename || file.name,
+        status: 'processing',
+        size_mb: uploadResult.size_mb,
+        progress: 60
+      }
+      setPendingFiles(p => p.map(f => f.id === tempId ? newDoc : f))
       setProjects(p => [newDoc, ...p])
+
+      // Poll for real backend processing progress every 2 seconds
+      let currentPct = 60
+      const processingInterval = setInterval(async () => {
+        try {
+          const res = await api.get(`/documents/${newDoc.id}/status`)
+          // Use real progress_percent if available, otherwise creep up
+          if (res.data.progress_percent != null) {
+            // Map backend 0–100 to frontend 60–99 range during processing
+            const backendPct = res.data.progress_percent
+            currentPct = Math.max(currentPct, Math.round(60 + (backendPct / 100) * 39))
+          } else if (currentPct < 99) {
+            currentPct = Math.min(99, currentPct + Math.floor(Math.random() * 4) + 1)
+          }
+          setPendingFiles(p => p.map(f =>
+            f.id === newDoc.id ? { ...f, progress: currentPct } : f
+          ))
+
+          if (res.data.status === 'ready') {
+            clearInterval(processingInterval)
+            setPendingFiles(p => p.map(f =>
+              f.id === newDoc.id ? { ...f, status: 'ready', progress: 100 } : f
+            ))
+            setProjects(p => p.map(f =>
+              f.id === newDoc.id ? { ...f, status: 'ready' } : f
+            ))
+          } else if (res.data.status === 'error') {
+            clearInterval(processingInterval)
+            setPendingFiles(p => p.filter(f => f.id !== newDoc.id))
+          }
+        } catch (_) { /* silently continue polling */ }
+      }, 2000)
+
     } catch (e) {
       console.error('Upload failed', e)
-      setPendingFiles(p => p.filter(f => f.id !== tempFile.id))
+      setPendingFiles(p => p.filter(f => f.id !== tempId))
     } finally {
       setUploading(false)
     }
@@ -244,10 +311,6 @@ export default function ChatPage() {
               <div className="home-secondary-actions">
                 <div className="secondary-action-link"><Icon.Workflows /> Explore workflows</div>
                 <div className="secondary-action-link"><Icon.Help /> Try an example</div>
-              </div>
-
-              <div className="spellbook-footer">
-                <Icon.Lock /> Your data is secure and private in Contract RFI
               </div>
             </div>
           ) : (

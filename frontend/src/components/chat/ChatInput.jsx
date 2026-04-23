@@ -1,16 +1,69 @@
 import { useRef } from 'react'
 import { Icon } from '../common/Icon'
 
+/* Circular progress ring around the file icon */
+function ProcessingRing({ progress = 0 }) {
+  const radius = 18
+  const stroke = 2.5
+  const normalizedRadius = radius - stroke
+  const circumference = 2 * Math.PI * normalizedRadius
+  const offset = circumference - (progress / 100) * circumference
+
+  return (
+    <svg
+      className="file-progress-ring"
+      width={radius * 2}
+      height={radius * 2}
+    >
+      {/* Background track */}
+      <circle
+        stroke="#e0e0e0"
+        fill="transparent"
+        strokeWidth={stroke}
+        r={normalizedRadius}
+        cx={radius}
+        cy={radius}
+      />
+      {/* Progress arc */}
+      <circle
+        className="file-progress-arc"
+        stroke="#4caf50"
+        fill="transparent"
+        strokeWidth={stroke}
+        strokeLinecap="round"
+        strokeDasharray={`${circumference} ${circumference}`}
+        style={{ strokeDashoffset: offset }}
+        r={normalizedRadius}
+        cx={radius}
+        cy={radius}
+      />
+    </svg>
+  )
+}
+
 function FileChip({ file, onRemove }) {
   const ext = (file.filename || file.name || '').split('.').pop()?.toLowerCase()
   const colors = { pdf: '#e53935', docx: '#1e88e5', doc: '#1e88e5' }
   const bg = colors[ext] || '#757575'
   const label = ext?.toUpperCase().slice(0, 3) || 'DOC'
+  const isProcessing = file.status === 'uploading' || file.status === 'processing'
+  const progress = file.progress ?? 0
+
   return (
     <div className="file-chip">
-      <div className="file-card-icon" style={{ background: bg, width: 24, height: 24, fontSize: '0.55rem' }}>{label}</div>
+      <div className="file-chip-icon-wrapper">
+        <div className="file-card-icon" style={{ background: bg, width: 24, height: 24, fontSize: '0.55rem' }}>{label}</div>
+        {isProcessing && (
+          <>
+            <ProcessingRing progress={progress} />
+            <span className="file-chip-pct">{progress}%</span>
+          </>
+        )}
+      </div>
       <span>{file.filename || file.name}</span>
-      <button className="file-chip-remove" onClick={onRemove}><Icon.Close /></button>
+      {!isProcessing && (
+        <button className="file-chip-remove" onClick={onRemove}><Icon.Close /></button>
+      )}
     </div>
   )
 }

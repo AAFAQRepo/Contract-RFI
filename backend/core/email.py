@@ -33,6 +33,7 @@ async def send_otp_email(to_email: str, otp: str):
     message.add_alternative(html_content, subtype="html")
 
     try:
+        print(f"📧 Attempting to send email to {to_email} via {settings.SMTP_HOST}...")
         await aiosmtplib.send(
             message,
             hostname=settings.SMTP_HOST,
@@ -41,8 +42,12 @@ async def send_otp_email(to_email: str, otp: str):
             password=settings.SMTP_PASSWORD,
             start_tls=settings.SMTP_TLS,
         )
-        print(f"✅ OTP Email sent to {to_email}")
+        print(f"✅ OTP Email successfully delivered to SMTP server for {to_email}")
         return True
     except Exception as e:
-        print(f"❌ Failed to send OTP Email to {to_email}: {str(e)}")
+        import traceback
+        print(f"❌ SMTP Error for {to_email}:")
+        print(f"Type: {type(e).__name__}")
+        print(f"Detail: {str(e)}")
+        # print(traceback.format_exc()) # Optional: very verbose
         return False

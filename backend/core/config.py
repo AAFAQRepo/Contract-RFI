@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     SMTP_TLS: bool = True
 
     model_config = {
-        "env_file": [".env", "../.env"],
+        "env_file": [".env", "../.env", "backend/.env"],
         "env_file_encoding": "utf-8",
         "extra": "ignore",
         "case_sensitive": False

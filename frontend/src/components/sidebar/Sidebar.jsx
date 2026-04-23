@@ -83,7 +83,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
       <div 
         className="sidebar-logo" 
         style={{ marginBottom: 6, cursor: 'pointer' }}
-        onClick={() => { setActiveProject(null); setActiveConversationId(null); navigate('/dashboard') }}
+        onClick={() => { setActiveProject(null); setActiveConversationId(null); navigate('/') }}
       >
         <Logo />
         <span className="sidebar-logo-text">Contract RFI</span>
@@ -93,9 +93,6 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
       </div>
 
       <div className="sidebar-nav">
-        <button className="sidebar-nav-item" onClick={() => navigate('/dashboard')}>
-          <Icon.Dashboard /> Dashboard
-        </button>
         <button className="sidebar-nav-item" onClick={handleNewProject} id="new-project-btn">
           <Icon.Plus /> New project
         </button>

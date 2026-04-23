@@ -6,9 +6,11 @@ import { useAuth } from '../../contexts/AuthContext'
  * Wrap protected routes with this component.
  */
 export default function ProtectedRoute() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, token } = useAuth()
+  console.log('ProtectedRoute: isAuthenticated=', isAuthenticated, 'hasToken=', !!token)
 
   if (!isAuthenticated) {
+    console.log('ProtectedRoute: Redirecting to /login')
     return <Navigate to="/login" replace />
   }
 

@@ -20,7 +20,7 @@ export default function LandingPage() {
           <a href="#security">Security</a>
         </div>
         <div className="nav-right">
-          <button onClick={() => navigate('/register')} className="nav-link-btn">Login</button>
+          <button onClick={() => navigate('/login')} className="nav-link-btn">Login</button>
           <button onClick={() => navigate('/register')} className="btn-white">Book a Demo</button>
         </div>
       </nav>

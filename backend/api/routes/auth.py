@@ -83,15 +83,15 @@ class ResendOTPRequest(BaseModel):
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 async def register(
-    request: UserRegister, 
-    req: Request, 
+    request: Request,
+    data: UserRegister, 
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Register a new user and create their organization."""
-    normalized_email = request.email.lower().strip()
+    normalized_email = data.email.lower().strip()
     
-    if len(request.password) < 8:
+    if len(data.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
         
     # Check if user exists
@@ -100,7 +100,7 @@ async def register(
         raise HTTPException(status_code=400, detail="Email already registered")
 
     # Create Org
-    org_name = request.company or f"{request.name or 'My'}'s Team"
+    org_name = data.company or f"{data.name or 'My'}'s Team"
     org = Organization(name=org_name)
     db.add(org)
     await db.flush() # Get org.id
@@ -111,9 +111,9 @@ async def register(
     # Create User
     new_user = User(
         email=normalized_email,
-        name=request.name,
-        password_hash=get_password_hash(request.password),
-        company=request.company,
+        name=data.name,
+        password_hash=get_password_hash(data.password),
+        company=data.company,
         role="owner", # First user is owner
         org_id=org.id,
         is_verified=False,
@@ -133,13 +133,13 @@ async def register(
 
 @router.post("/login")
 @limiter.limit("10/minute")
-async def login(request: LoginRequest, req: Request, db: AsyncSession = Depends(get_db)):
+async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Authenticate and return access + refresh tokens."""
-    normalized_email = request.email.lower().strip()
+    normalized_email = data.email.lower().strip()
     result = await db.execute(select(User).where(User.email == normalized_email))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(request.password, user.password_hash):
+    if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -225,9 +225,9 @@ async def save_onboarding(request: OnboardingResponseSchema, db: AsyncSession = 
     return {"message": "Onboarding completed"}
 @router.post("/forgot-password")
 @limiter.limit("3/minute")
-async def forgot_password(request: ForgotPasswordRequest, req: Request, db: AsyncSession = Depends(get_db)):
+async def forgot_password(request: Request, data: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
     """Generate a reset token and 'send' an email."""
-    normalized_email = request.email.lower().strip()
+    normalized_email = data.email.lower().strip()
     result = await db.execute(select(User).where(User.email == normalized_email))
     user = result.scalar_one_or_none()
     
@@ -245,15 +245,15 @@ async def forgot_password(request: ForgotPasswordRequest, req: Request, db: Asyn
 
 @router.post("/reset-password")
 @limiter.limit("3/minute")
-async def reset_password(request: ResetPasswordRequest, req: Request, db: AsyncSession = Depends(get_db)):
+async def reset_password(request: Request, data: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
     """Reset password using a valid token."""
-    result = await db.execute(select(User).where(User.reset_token == request.token))
+    result = await db.execute(select(User).where(User.reset_token == data.token))
     user = result.scalar_one_or_none()
     
     if not user or user.reset_token_expires < datetime.utcnow():
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
     
-    user.password_hash = get_password_hash(request.new_password)
+    user.password_hash = get_password_hash(data.new_password)
     user.reset_token = None
     user.reset_token_expires = None
     await db.commit()
@@ -292,7 +292,7 @@ async def change_password(
 
 @router.get("/check-email")
 @limiter.limit("10/minute")
-async def check_email(email: EmailStr, req: Request, db: AsyncSession = Depends(get_db)):
+async def check_email(request: Request, email: EmailStr, db: AsyncSession = Depends(get_db)):
     """Check if an email is already registered. Returns available: bool"""
     normalized_email = email.lower().strip()
     result = await db.execute(select(User).where(User.email == normalized_email))
@@ -301,9 +301,9 @@ async def check_email(email: EmailStr, req: Request, db: AsyncSession = Depends(
 
 @router.post("/verify-otp")
 @limiter.limit("10/minute")
-async def verify_otp(request: VerifyOTPRequest, req: Request, db: AsyncSession = Depends(get_db)):
+async def verify_otp(request: Request, data: VerifyOTPRequest, db: AsyncSession = Depends(get_db)):
     """Verify the 6-digit OTP and activate the user account."""
-    normalized_email = request.email.lower().strip()
+    normalized_email = data.email.lower().strip()
     result = await db.execute(select(User).where(User.email == normalized_email))
     user = result.scalar_one_or_none()
     
@@ -313,7 +313,7 @@ async def verify_otp(request: VerifyOTPRequest, req: Request, db: AsyncSession =
     if user.is_verified:
         return {"message": "Account already verified", "verified": True}
         
-    if user.verification_token != request.otp:
+    if user.verification_token != data.otp:
         raise HTTPException(status_code=400, detail="Invalid verification code")
         
     user.is_verified = True
@@ -325,13 +325,13 @@ async def verify_otp(request: VerifyOTPRequest, req: Request, db: AsyncSession =
 @router.post("/resend-otp")
 @limiter.limit("2/minute")
 async def resend_otp(
-    request: ResendOTPRequest, 
-    req: Request, 
+    request: Request,
+    data: ResendOTPRequest, 
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Regenerate and resend a 6-digit OTP."""
-    normalized_email = request.email.lower().strip()
+    normalized_email = data.email.lower().strip()
     result = await db.execute(select(User).where(User.email == normalized_email))
     user = result.scalar_one_or_none()
     

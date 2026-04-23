@@ -36,7 +36,8 @@ api.interceptors.response.use(
         } catch (refreshError) {
           // Refresh failed - log out
           localStorage.clear()
-          if (window.location.pathname !== '/login') {
+          const publicRoutes = ['/', '/login', '/register', '/forgot-password']
+          if (!publicRoutes.includes(window.location.pathname)) {
             window.location.href = '/login'
           }
           return Promise.reject(refreshError)
@@ -44,7 +45,8 @@ api.interceptors.response.use(
       } else {
         // No refresh token - log out
         localStorage.clear()
-        if (window.location.pathname !== '/login') {
+        const publicRoutes = ['/', '/login', '/register', '/forgot-password']
+        if (!publicRoutes.includes(window.location.pathname)) {
           window.location.href = '/login'
         }
       }

@@ -227,18 +227,33 @@ export default function ChatPage() {
         <div className="chat-area">
           {!project && messages.length === 0 ? (
             <div className="home-screen">
-              <h1 className="home-greeting">{getGreeting()} {user?.name || 'there'}, let's get to work</h1>
+              <h1 className="home-greeting">{getGreeting()} {user?.name?.split(' ')[0] || 'there'}, let's get to work</h1>
+              
               <div className="home-input-box">
                 <ChatInput 
                   input={input} setInput={setInput} onSend={() => sendMessage()} 
                   onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
                   onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
                   sending={sending} disabled={isProcessing} idPrefix="home"
+                  variant="spellbook"
                 />
               </div>
-              <div className="home-footer">
-                <Icon.Lock /> Your data is secure and private
+
+              <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} variant="spellbook" />
+
+              <div className="home-secondary-actions">
+                <div className="secondary-action-link"><Icon.Workflows /> Explore workflows</div>
+                <div className="secondary-action-link"><Icon.Help /> Try an example</div>
               </div>
+
+              <div className="spellbook-footer">
+                <Icon.Lock /> Your data is secure and private in Contract RFI
+              </div>
+
+              <button className="word-install-btn">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/4/4f/Microsoft_Word_2013_logo.svg" width="16" alt="" />
+                Install Contract RFI for Word
+              </button>
             </div>
           ) : (
             <div className="messages-wrapper">

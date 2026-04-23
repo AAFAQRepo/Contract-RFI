@@ -19,8 +19,9 @@ export default function ChatInput({
   input, setInput, onSend, onUploadClick,
   pendingFiles = [], onRemoveFile, sending,
   disabled = false,
-  placeholder = "Ask about your contracts...",
-  idPrefix = "chat"
+  placeholder = "Ask Spellbook to edit, review, or summarize legal documents",
+  idPrefix = "chat",
+  variant = "classic" // or "spellbook"
 }) {
   const textareaRef = useRef(null)
   const effectivePlaceholder = disabled ? "Waiting for documents to process..." : placeholder
@@ -34,6 +35,51 @@ export default function ChatInput({
 
   const handleKeyDown = e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!disabled) onSend() }
+  }
+
+  if (variant === 'spellbook') {
+    return (
+      <div className={`chat-input-box spellbook-style ${disabled ? 'disabled' : ''}`}>
+        {pendingFiles.length > 0 && (
+          <div className="file-chips-container" style={{ paddingBottom: 12 }}>
+            {pendingFiles.map(f => (
+              <FileChip key={f.id || f.name} file={f} onRemove={() => onRemoveFile(f)} />
+            ))}
+          </div>
+        )}
+        <textarea 
+          ref={textareaRef} 
+          className="spellbook-textarea" 
+          placeholder={effectivePlaceholder}
+          value={input} 
+          onChange={handleInputChange} 
+          onKeyDown={handleKeyDown}
+          rows={1} 
+          disabled={disabled} 
+          id={`${idPrefix}-input`} 
+        />
+        <div className="spellbook-actions">
+          <button className="spellbook-btn" onClick={onUploadClick} disabled={sending}>
+            <Icon.Attach /> Add files
+          </button>
+          <button className="spellbook-btn" disabled={disabled}>
+            <Icon.Library /> Library
+          </button>
+          <div style={{ flex: 1 }} />
+          <button className="spellbook-btn prompts" disabled={disabled}>
+            <Icon.Message /> Prompts
+          </button>
+          <button
+            className={`spellbook-send ${(input.trim() || pendingFiles.length > 0) && !sending && !disabled ? 'active' : ''}`}
+            onClick={onSend}
+            disabled={(!input.trim() && pendingFiles.length === 0) || sending || disabled}
+            id={`${idPrefix}-send-btn`}
+          >
+            <Icon.Send />
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -65,3 +111,4 @@ export default function ChatInput({
     </div>
   )
 }
+

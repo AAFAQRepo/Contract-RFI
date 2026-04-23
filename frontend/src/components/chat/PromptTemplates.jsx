@@ -1,16 +1,32 @@
-/**
- * Pre-built legal prompt templates for quick actions.
- */
+import { Icon } from '../common/Icon'
+
 const PROMPT_TEMPLATES = [
-  { id: 'summarize', label: 'Summarize', prompt: 'Provide a concise executive summary of this contract, including key terms, obligations, and important provisions.' },
-  { id: 'risks', label: 'Find Risks', prompt: 'Identify all risk factors, penalty clauses, liability provisions, and unfavorable terms in this contract.' },
-  { id: 'compare', label: 'Compare', prompt: 'Compare the key terms, obligations, and conditions across the attached documents. Highlight differences.' },
-  { id: 'dates', label: 'Key Dates', prompt: 'Extract all important dates, deadlines, renewal periods, and time-sensitive clauses from this contract.' },
-  { id: 'parties', label: 'Parties', prompt: 'Identify all parties mentioned in this contract, their roles, rights, and obligations.' },
-  { id: 'missing', label: 'Missing Clauses', prompt: 'Analyze this contract and identify any standard legal clauses that are missing or inadequately addressed.' },
+  { id: 'edit', label: 'Edit documents', icon: <Icon.Plus />, color: 'purple', prompt: 'I want to edit this contract. Help me review the terms and suggest improvements or redlines.' },
+  { id: 'draft', label: 'Draft from precedent', icon: <Icon.Library />, color: 'green', prompt: 'Based on my past precedents, help me draft a new version of this agreement.' },
+  { id: 'table', label: 'Review table', icon: <Icon.Columns />, color: 'blue', prompt: 'Create a summary table of the key terms, obligations, and deadlines found in this contract.' },
+  { id: 'summarize', label: 'Summarize redlines', icon: <Icon.Collapse />, color: 'red', prompt: 'Summarize all the redlines and changes made to this document.' },
+  { id: 'compare', label: 'Compare substantive differences', icon: <Icon.Copy />, color: 'orange', prompt: 'Compare these documents and identify the substantive legal differences between them.' },
 ]
 
-export default function PromptTemplates({ onSelect, disabled }) {
+export default function PromptTemplates({ onSelect, disabled, variant = 'classic' }) {
+  if (variant === 'spellbook') {
+    return (
+      <div className="spellbook-chips">
+        {PROMPT_TEMPLATES.map(t => (
+          <button
+            key={t.id}
+            className={`spellbook-chip ${t.color}`}
+            onClick={() => onSelect(t.prompt)}
+            disabled={disabled}
+          >
+            <span className="spellbook-chip-icon">{t.icon}</span>
+            {t.label}
+          </button>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className="prompt-templates">
       {PROMPT_TEMPLATES.map(t => (
@@ -29,3 +45,4 @@ export default function PromptTemplates({ onSelect, disabled }) {
 }
 
 export { PROMPT_TEMPLATES }
+

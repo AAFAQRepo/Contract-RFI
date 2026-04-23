@@ -249,11 +249,6 @@ export default function ChatPage() {
               <div className="spellbook-footer">
                 <Icon.Lock /> Your data is secure and private in Contract RFI
               </div>
-
-              <button className="word-install-btn">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/4/4f/Microsoft_Word_2013_logo.svg" width="16" alt="" />
-                Install Contract RFI for Word
-              </button>
             </div>
           ) : (
             <div className="messages-wrapper">
@@ -261,7 +256,6 @@ export default function ChatPage() {
                 <div className="chat-empty">
                   <div className="chat-empty-icon">📁</div>
                   <p>Discuss the files in this project</p>
-                  <p style={{ fontSize: '0.78rem', color: '#bbb' }}>Upload a contract to get started</p>
                   {hasError && <div style={{ marginTop: 20, color: '#d63031' }}>Error processing document.</div>}
                 </div>
               )}
@@ -300,7 +294,7 @@ export default function ChatPage() {
         )}
 
         <div className="bottom-privacy">
-          <Icon.Lock /> {hasError ? "Processing failed. Check file errors." : "Your data is secure and private"}
+          <Icon.Lock /> {hasError ? "Processing failed. Check file errors." : "Your data is secure and private in Contract RFI"}
         </div>
       </div>
 

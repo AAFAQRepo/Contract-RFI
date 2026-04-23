@@ -1,12 +1,20 @@
-import { createContext, useContext, useState, useCallback } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import api from '../api/client'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem('token'))
+  const [token, setToken] = useState(() => {
+    const t = localStorage.getItem('token')
+    console.log('AuthProvider: Initial token from localStorage:', t ? 'EXISTS' : 'MISSING')
+    return t
+  })
   const [user, setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('user')) } catch { return null }
+    try { 
+      const u = JSON.parse(localStorage.getItem('user'))
+      console.log('AuthProvider: Initial user from localStorage:', u ? u.email : 'MISSING')
+      return u
+    } catch { return null }
   })
 
   const login = useCallback(async (email, password) => {
@@ -43,6 +51,16 @@ export function AuthProvider({ children }) {
   }, [])
 
   const isAuthenticated = !!token
+
+  // Verify token on mount
+  useEffect(() => {
+    if (token) {
+      fetchUser().catch(() => {
+        // fetchUser already handles logging error, but we might want to clear here if it fails critically
+        // although api interceptor should handle 401
+      })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <AuthContext.Provider value={{ token, user, isAuthenticated, login, logout, fetchUser }}>

@@ -7,9 +7,9 @@ from core.auth import get_current_user
 from models.models import User, Organization, Subscription, UsageRecord
 
 PLAN_LIMITS = {
-    "free":       {"documents": 5,   "queries": 50,   "max_file_mb": 10,  "ocr": False},
-    "pro":        {"documents": 50,  "queries": 500,  "max_file_mb": 50,  "ocr": True},
-    "enterprise": {"documents": -1,  "queries": -1,   "max_file_mb": 100, "ocr": True},
+    "free":       {"documents": 50,  "queries": 500,  "max_file_mb": 25,  "ocr": True},
+    "pro":        {"documents": 200, "queries": 2000, "max_file_mb": 100, "ocr": True},
+    "enterprise": {"documents": -1,  "queries": -1,   "max_file_mb": 500, "ocr": True},
 }
 
 async def get_org_subscription(org_id: str, db: AsyncSession) -> Subscription:

@@ -91,3 +91,23 @@ async def get_recent_activity(
     
     activity.sort(key=lambda x: x["timestamp"], reverse=True)
     return activity[:limit]
+
+@router.get("/usage")
+async def get_usage(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Return flat usage data for the SubscriptionContext."""
+    if not current_user.org_id:
+        return {"documents": 0, "queries": 0, "limit": 5, "plan": "free"}
+
+    usage = await get_current_usage(current_user.org_id, db)
+    sub = await get_org_subscription(current_user.org_id, db)
+    limits = PLAN_LIMITS.get(sub.plan, PLAN_LIMITS["free"])
+
+    return {
+        "documents": usage.documents_used,
+        "queries": usage.queries_used,
+        "limit": limits["documents"],
+        "plan": sub.plan,
+    }

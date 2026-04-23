@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import api from '../api/client'
 import { Icon } from '../components/common/Icon'
 import { useAuth } from '../contexts/AuthContext'
@@ -19,17 +19,18 @@ function getGreeting() {
 
 export default function ChatPage() {
   const { user } = useAuth()
-  const { 
-    activeProject: project, setActiveProject: setProject, 
-    projects, setProjects, 
-    fetchProjects, conversations, fetchConversations,
-    activeConversationId, setActiveConversationId
+  const {
+    conversations, fetchConversations,
+    activeConversationId, setActiveConversationId,
+    conversationDocs, setConversationDocs, fetchConversationDocs,
+    resetForNewChat,
   } = useProjects()
   const { refreshUsage } = useSubscription()
 
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  // pendingFiles: files uploaded in the current session before a conversation exists
   const [pendingFiles, setPendingFiles] = useState([])
   const [uploading, setUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -37,32 +38,38 @@ export default function ChatPage() {
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
 
-  // Scroll to bottom on messages
+  // Scroll to bottom on new messages
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
-  // Global Polling for processing documents
+  // Poll for processing status on pending files
   useEffect(() => {
-    const hasProcessing = projects.some(f => f.status === 'processing' || f.status === 'uploading')
+    const hasProcessing = pendingFiles.some(f => f.status === 'processing' || f.status === 'uploading')
     if (!hasProcessing) return
-
-    const interval = setInterval(fetchProjects, 3000)
+    const interval = setInterval(async () => {
+      for (const f of pendingFiles.filter(f => f.status === 'processing')) {
+        try {
+          const res = await api.get(`/documents/${f.id}/status`)
+          if (res.data.status === 'ready') {
+            setPendingFiles(p => p.map(x => x.id === f.id ? { ...x, status: 'ready', progress: 100 } : x))
+            setConversationDocs(d => d.map(x => x.id === f.id ? { ...x, status: 'ready' } : x))
+          } else if (res.data.status === 'error') {
+            setPendingFiles(p => p.filter(x => x.id !== f.id))
+          }
+        } catch { /* silent */ }
+      }
+    }, 3000)
     return () => clearInterval(interval)
-  }, [projects, fetchProjects])
+  }, [pendingFiles, setConversationDocs])
 
-  // Load chat history when project or conversation changes
+  // Load chat history when active conversation changes
   useEffect(() => {
     setMessages([])
-    
-    const isGlobal = (!project || String(project.id).startsWith('temp-')) && !activeConversationId
-    const docId = project?.id && !String(project.id).startsWith('temp-') ? project.id : null
+    setPendingFiles([])
 
-    if (isGlobal && !localStorage.getItem('forceHistory')) return
+    if (!activeConversationId) return
+    if (!localStorage.getItem('forceHistory')) return
 
-    const url = activeConversationId 
-      ? `/chat/history?conversation_id=${activeConversationId}`
-      : `/chat/history?document_id=${docId || 'global'}`
-
-    api.get(url)
+    api.get(`/chat/history?conversation_id=${activeConversationId}`)
       .then(r => {
         const flattened = []
         r.data.forEach(c => {
@@ -72,18 +79,26 @@ export default function ChatPage() {
         setMessages(flattened)
       })
       .catch(err => console.error('Failed to load history', err))
-  }, [project?.id, activeConversationId])
+  }, [activeConversationId])
 
+  // Combined docs for the right panel: confirmed conv docs + current pending files
+  const allVisibleDocs = [
+    ...conversationDocs,
+    ...pendingFiles.filter(pf => !conversationDocs.some(cd => cd.id === pf.id))
+  ]
+
+  // All ready document IDs to send in the chat query
+  const readyDocumentIds = allVisibleDocs
+    .filter(f => f.status === 'ready')
+    .map(f => f.id)
+
+  /* ── Send message ─────────────────────────────────────────── */
   const sendMessage = async (overrideInput) => {
     const text = (overrideInput || input).trim()
-    if ((!text && pendingFiles.length === 0) || sending) return
-    
-    const attachedFiles = [...pendingFiles]
-    const currentDocId = project?.id && !String(project.id).startsWith('temp-') ? project.id : null
+    if (!text || sending) return
 
     setInput('')
-    setPendingFiles([])
-    setMessages(m => [...m, { id: Date.now(), role: 'user', text, files: attachedFiles }])
+    setMessages(m => [...m, { id: Date.now(), role: 'user', text }])
     setSending(true)
 
     try {
@@ -96,8 +111,8 @@ export default function ChatPage() {
         },
         body: JSON.stringify({
           query: text,
-          document_id: currentDocId,
-          conversation_id: activeConversationId
+          document_ids: readyDocumentIds,
+          conversation_id: activeConversationId || null
         })
       })
 
@@ -105,10 +120,9 @@ export default function ChatPage() {
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
-      
       let aiMessageId = Date.now() + 1
-      let fullContent = ""
-      
+      let fullContent = ''
+
       setMessages(m => [...m, { id: aiMessageId, role: 'ai', text: '', thinking: '', sources: [] }])
 
       while (true) {
@@ -118,7 +132,7 @@ export default function ChatPage() {
         const chunk = decoder.decode(value, { stream: true })
         fullContent += chunk
 
-        let currentThinking = ""
+        let currentThinking = ''
         let currentAnswer = fullContent
 
         if (fullContent.includes('<thinking>')) {
@@ -129,32 +143,52 @@ export default function ChatPage() {
             currentAnswer = innerParts[1].trim()
           } else {
             currentThinking = parts[1].trim()
-            currentAnswer = "" 
+            currentAnswer = ''
           }
         }
 
-        setMessages(m => m.map(msg => 
-          msg.id === aiMessageId 
+        setMessages(m => m.map(msg =>
+          msg.id === aiMessageId
             ? { ...msg, text: currentAnswer, thinking: currentThinking }
             : msg
         ))
       }
 
-      fetchConversations()
+      // After the first message, refresh conversations to show the new one in sidebar
+      // and fetch its scoped documents (the backend links them during this call)
+      await fetchConversations()
+      
+      // If this was a new conversation, the backend just created it.
+      // We need to figure out the new conversation ID.
+      // Re-fetch conversations and set the latest one as active.
+      if (!activeConversationId) {
+        const r = await api.get('/chat/conversations')
+        if (Array.isArray(r.data) && r.data.length > 0) {
+          const newConvId = r.data[0].id
+          localStorage.setItem('forceHistory', 'true')
+          setActiveConversationId(newConvId)
+          // Fetch and merge conversation docs to reflect the newly linked files
+          await fetchConversationDocs(newConvId)
+          // Clear pending files (they are now officially in the conversation)
+          setPendingFiles([])
+        }
+      }
+
       refreshUsage()
 
     } catch (err) {
       console.error('Streaming error:', err)
-      setMessages(m => [...m, { 
-        id: Date.now() + 2, 
-        role: 'ai', 
-        text: `Sorry, I encountered an error while connecting to the AI server. (${err.message})` 
+      setMessages(m => [...m, {
+        id: Date.now() + 2,
+        role: 'ai',
+        text: `Sorry, I encountered an error. (${err.message})`
       }])
     } finally {
       setSending(false)
     }
   }
 
+  /* ── Upload ───────────────────────────────────────────────── */
   const handleUpload = async (file) => {
     const tempId = `uploading-${Date.now()}`
     const tempFile = { id: tempId, filename: file.name, status: 'uploading', progress: 0 }
@@ -163,9 +197,10 @@ export default function ChatPage() {
 
     const form = new FormData()
     form.append('file', file)
+    // If a conversation already exists, scope the doc to it immediately
+    if (activeConversationId) form.append('conversation_id', activeConversationId)
 
     try {
-      // Use XMLHttpRequest so we get real upload progress
       const token = localStorage.getItem('token')
       const uploadResult = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest()
@@ -174,18 +209,13 @@ export default function ChatPage() {
 
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
-            // Upload counts as first 60% of the overall progress
             const pct = Math.round((e.loaded / e.total) * 60)
             setPendingFiles(p => p.map(f => f.id === tempId ? { ...f, progress: pct } : f))
           }
         }
-
         xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(JSON.parse(xhr.responseText))
-          } else {
-            reject(new Error(`Upload failed: ${xhr.status}`))
-          }
+          if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText))
+          else reject(new Error(`Upload failed: ${xhr.status}`))
         }
         xhr.onerror = () => reject(new Error('Network error'))
         xhr.send(form)
@@ -196,41 +226,39 @@ export default function ChatPage() {
         filename: uploadResult.filename || file.name,
         status: 'processing',
         size_mb: uploadResult.size_mb,
-        progress: 60
+        progress: 60,
+        conversation_id: uploadResult.conversation_id || null,
       }
       setPendingFiles(p => p.map(f => f.id === tempId ? newDoc : f))
-      setProjects(p => [newDoc, ...p])
 
-      // Poll for real backend processing progress every 2 seconds
+      // If scoped to an active conversation, also add to conversationDocs
+      if (activeConversationId) {
+        setConversationDocs(d => [newDoc, ...d])
+      }
+
+      // Polling for completion
       let currentPct = 60
       const processingInterval = setInterval(async () => {
         try {
           const res = await api.get(`/documents/${newDoc.id}/status`)
-          // Use real progress_percent if available, otherwise creep up
           if (res.data.progress_percent != null) {
-            // Map backend 0–100 to frontend 60–99 range during processing
-            const backendPct = res.data.progress_percent
-            currentPct = Math.max(currentPct, Math.round(60 + (backendPct / 100) * 39))
+            currentPct = Math.max(currentPct, Math.round(60 + (res.data.progress_percent / 100) * 39))
           } else if (currentPct < 99) {
             currentPct = Math.min(99, currentPct + Math.floor(Math.random() * 4) + 1)
           }
-          setPendingFiles(p => p.map(f =>
-            f.id === newDoc.id ? { ...f, progress: currentPct } : f
-          ))
+          setPendingFiles(p => p.map(f => f.id === newDoc.id ? { ...f, progress: currentPct } : f))
 
           if (res.data.status === 'ready') {
             clearInterval(processingInterval)
-            setPendingFiles(p => p.map(f =>
-              f.id === newDoc.id ? { ...f, status: 'ready', progress: 100 } : f
-            ))
-            setProjects(p => p.map(f =>
-              f.id === newDoc.id ? { ...f, status: 'ready' } : f
-            ))
+            setPendingFiles(p => p.map(f => f.id === newDoc.id ? { ...f, status: 'ready', progress: 100 } : f))
+            if (activeConversationId) {
+              setConversationDocs(d => d.map(f => f.id === newDoc.id ? { ...f, status: 'ready' } : f))
+            }
           } else if (res.data.status === 'error') {
             clearInterval(processingInterval)
             setPendingFiles(p => p.filter(f => f.id !== newDoc.id))
           }
-        } catch (_) { /* silently continue polling */ }
+        } catch { /* silent */ }
       }, 2000)
 
     } catch (e) {
@@ -241,45 +269,43 @@ export default function ChatPage() {
     }
   }
 
+  /* ── Delete ───────────────────────────────────────────────── */
   const handleDeleteMessage = async (mid) => {
-    if (!window.confirm("Delete this message?")) return
+    if (!window.confirm('Delete this message?')) return
     try {
       await api.delete(`/chat/${mid}`)
       setMessages(m => m.filter(msg => !msg.id.toString().endsWith(mid)))
-    } catch (e) {
-      alert('Failed to delete message')
-    }
+    } catch { alert('Failed to delete message') }
   }
 
   const handleDeleteDocument = async (doc) => {
     if (!window.confirm(`Delete "${doc.filename}"?`)) return
     try {
       await api.delete(`/documents/${doc.id}`)
-      setProjects(p => p.filter(f => f.id !== doc.id))
       setPendingFiles(p => p.filter(f => f.id !== doc.id))
-    } catch (e) {
-      alert('Failed to delete document')
-    }
+      setConversationDocs(d => d.filter(f => f.id !== doc.id))
+    } catch { alert('Failed to delete document') }
   }
 
   const triggerFileUpload = () => fileInputRef.current?.click()
-  
-  const activeDoc = projects.find(f => f.id === project?.id)
-  const isProcessing = activeDoc ? (activeDoc.status === 'processing' || activeDoc.status === 'uploading') : pendingFiles.length > 0
-  const hasError = activeDoc?.status === 'error'
 
-  const projectName = project?.filename || project?.name || 'General Chat'
+  const isProcessing = allVisibleDocs.some(f => f.status === 'processing' || f.status === 'uploading')
+  const hasActiveChat = !!activeConversationId || messages.length > 0
 
   return (
     <>
       <input ref={fileInputRef} type="file" accept=".pdf,.docx,.doc" style={{ display: 'none' }}
         onChange={e => { const f = e.target.files[0]; if (f) handleUpload(f); e.target.value = '' }} />
-      
+
       <div className="main-area">
         {/* Topbar */}
         <div className="topbar">
           <div className="topbar-left">
-            <span className="topbar-title">{projectName}</span>
+            <span className="topbar-title">
+              {activeConversationId
+                ? (conversations.find(c => c.id === activeConversationId)?.title || 'Chat')
+                : 'New Chat'}
+            </span>
             <span className="topbar-chevron"><Icon.ChevronDown /></span>
           </div>
           <div className="topbar-right">
@@ -292,13 +318,13 @@ export default function ChatPage() {
 
         {/* Chat Area */}
         <div className="chat-area">
-          {!project && messages.length === 0 ? (
+          {!hasActiveChat ? (
             <div className="home-screen">
               <h1 className="home-greeting">{getGreeting()} {user?.name?.split(' ')[0] || 'there'}, let's get to work</h1>
-              
+
               <div className="home-input-box">
-                <ChatInput 
-                  input={input} setInput={setInput} onSend={() => sendMessage()} 
+                <ChatInput
+                  input={input} setInput={setInput} onSend={() => sendMessage()}
                   onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
                   onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
                   sending={sending} disabled={isProcessing} idPrefix="home"
@@ -317,9 +343,8 @@ export default function ChatPage() {
             <div className="messages-wrapper">
               {messages.length === 0 && (
                 <div className="chat-empty">
-                  <div className="chat-empty-icon">📁</div>
-                  <p>Discuss the files in this project</p>
-                  {hasError && <div style={{ marginTop: 20, color: '#d63031' }}>Error processing document.</div>}
+                  <div className="chat-empty-icon">💬</div>
+                  <p>Ask anything about your uploaded documents</p>
                 </div>
               )}
               {messages.map(msg =>
@@ -342,30 +367,35 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Input area - only show if there's an active project or messages */}
-        {(project || messages.length > 0) && (
+        {/* Input — always shown when chat is active */}
+        {hasActiveChat && (
           <div className="chat-input-wrapper">
             <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} />
-            <ChatInput 
-              input={input} setInput={setInput} onSend={() => sendMessage()} 
+            <ChatInput
+              input={input} setInput={setInput} onSend={() => sendMessage()}
               onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
               onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
-              sending={sending} disabled={isProcessing || hasError}
+              sending={sending} disabled={isProcessing}
               idPrefix="chat"
             />
           </div>
         )}
 
         <div className="bottom-privacy">
-          <Icon.Lock /> {hasError ? "Processing failed. Check file errors." : "Your data is secure and private in Contract RFI"}
+          <Icon.Lock /> Your data is secure and private in Contract RFI
         </div>
       </div>
 
       {showFiles && (
         <FilesPanel
-          files={projects} onUpload={handleUpload} onUploadClick={triggerFileUpload}
-          uploading={uploading} dragOver={dragOver} setDragOver={setDragOver}
-          onClose={() => setShowFiles(false)} onDelete={handleDeleteDocument}
+          files={allVisibleDocs}
+          onUpload={handleUpload}
+          onUploadClick={triggerFileUpload}
+          uploading={uploading}
+          dragOver={dragOver}
+          setDragOver={setDragOver}
+          onClose={() => setShowFiles(false)}
+          onDelete={handleDeleteDocument}
         />
       )}
     </>

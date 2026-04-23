@@ -63,6 +63,8 @@ class Document(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # conversation_id scopes this document to a specific chat — NULL means legacy/orphaned
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True)
     filename = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
     file_size_bytes = Column(BigInteger, nullable=True)
@@ -79,6 +81,7 @@ class Document(Base):
 
     # Relationships
     user = relationship("User", back_populates="documents")
+    conversation = relationship("Conversation", back_populates="documents")
     chunks = relationship("Chunk", back_populates="document", cascade="all, delete-orphan")
     review = relationship("Review", back_populates="document", uselist=False, cascade="all, delete-orphan")
     chats = relationship("Chat", back_populates="document", cascade="all, delete-orphan")
@@ -86,6 +89,7 @@ class Document(Base):
     __table_args__ = (
         Index("idx_documents_user_id", "user_id"),
         Index("idx_documents_status", "status"),
+        Index("idx_documents_conversation_id", "conversation_id"),
     )
 
 
@@ -146,6 +150,7 @@ class Conversation(Base):
     # Relationships
     user = relationship("User", backref="conversations")
     messages = relationship("Chat", back_populates="conversation", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="conversation", cascade="all, delete-orphan")
 
 
 class Chat(Base):

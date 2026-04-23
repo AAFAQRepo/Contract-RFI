@@ -7,9 +7,10 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from typing import Optional
 
 from core.database import get_db
 from core.auth import get_current_user
@@ -27,6 +28,7 @@ MAX_FILE_SIZE_MB = 100
 @router.post("/upload")
 async def upload_document_endpoint(
     file: UploadFile = File(...),
+    conversation_id: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _limit: bool = Depends(check_usage_limit("documents")),
@@ -51,7 +53,6 @@ async def upload_document_endpoint(
             detail=f"File too large ({size_mb:.1f} MB). Maximum: {MAX_FILE_SIZE_MB} MB",
         )
 
-    # Use authenticated user (currently dummy in auth.py)
     user_id = str(current_user.id)
     document_id = str(uuid.uuid4())
 
@@ -63,10 +64,11 @@ async def upload_document_endpoint(
         content_type=file.content_type or "application/octet-stream",
     )
 
-    # Create DB record
+    # Create DB record, optionally scoped to a conversation
     doc = Document(
         id=document_id,
         user_id=user_id,
+        conversation_id=conversation_id if conversation_id else None,
         filename=file.filename,
         file_path=object_name,
         file_size_bytes=len(file_bytes),
@@ -95,20 +97,26 @@ async def upload_document_endpoint(
         "filename": file.filename,
         "status": "processing",
         "size_mb": round(size_mb, 2),
+        "conversation_id": conversation_id,
         "message": "Document uploaded. Processing started in background.",
     }
 
 
 @router.get("/")
 async def list_documents(
+    conversation_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all documents."""
+    """List documents. If conversation_id provided, return only docs for that chat."""
     user_id = str(current_user.id)
-    result = await db.execute(
-        select(Document).where(Document.user_id == user_id).order_by(Document.created_at.desc())
-    )
+    query = select(Document).where(Document.user_id == user_id)
+    if conversation_id:
+        query = query.where(Document.conversation_id == conversation_id)
+    else:
+        # No filter: return only orphaned docs (no conversation)
+        query = query.where(Document.conversation_id == None)  # noqa: E711
+    result = await db.execute(query.order_by(Document.created_at.desc()))
     docs = result.scalars().all()
     return {
         "documents": [
@@ -121,6 +129,7 @@ async def list_documents(
                 "language": d.language,
                 "page_count": d.page_count,
                 "size_mb": round((d.file_size_bytes or 0) / (1024 * 1024), 2),
+                "conversation_id": str(d.conversation_id) if d.conversation_id else None,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
             }
             for d in docs

@@ -21,7 +21,7 @@ llm_service = LLMService()
 
 class ChatQuery(BaseModel):
     query: str
-    document_id: Optional[str] = None
+    document_ids: List[str] = []  # All docs scoped to this conversation
     conversation_id: Optional[str] = None
 
 class SourceChunk(BaseModel):
@@ -55,24 +55,23 @@ async def chat_message(
     """
     start_time = time.time()
     
-    # 1. Retrieve Context (Sync/Async retrieval)
+    # 1. Retrieve context from ALL documents in this conversation
     chunks: List[RetrievedChunk] = []
-    if payload.document_id:
-        chunks = retriever.search(
+    for doc_id in payload.document_ids:
+        doc_chunks = retriever.search(
             query=payload.query,
             user_id=str(current_user.id),
-            document_id=payload.document_id,
+            document_id=doc_id,
             top_k=5
         )
+        chunks.extend(doc_chunks)
+    # Re-rank combined results by score, keep top 10
+    chunks = sorted(chunks, key=lambda c: getattr(c, 'score', 0), reverse=True)[:10]
 
     # 2. Generator for Streaming
     async def event_generator():
         full_answer = ""
-        thinking = ""
         in_thinking = False
-        
-        # We start by notifying the UI we are beginning
-        # (The thinking block logic actually happens in the model stream)
         
         async for token in llm_service.generate_response_stream(
             query=payload.query,
@@ -80,19 +79,13 @@ async def chat_message(
             user_name=current_user.name or "User"
         ):
             full_answer += token
-            
-            # Detect <thinking> tags to help UI
             if "<thinking>" in token: in_thinking = True
             if "</thinking>" in token: in_thinking = False
-            
-            # Yield token as a simple string or JSON
-            # We'll use a simple "type:token" format or just the token
             yield token
 
-        # 3. Final Persistence (Done after stream finishes)
+        # 3. Final Persistence (after stream finishes)
         latency_ms = int((time.time() - start_time) * 1000)
         
-        # Parse final result for DB
         final_thinking = ""
         final_answer = full_answer
         if "<thinking>" in full_answer and "</thinking>" in full_answer:
@@ -101,11 +94,12 @@ async def chat_message(
             final_answer = parts[1].strip()
 
         # Save to DB
-        from models.models import Conversation
+        from models.models import Conversation, Document
+        from sqlalchemy import update as sa_update
         
         conv_id = payload.conversation_id
         if not conv_id:
-            # Create new conversation
+            # Create new conversation with title from query
             new_conv = Conversation(
                 user_id=current_user.id,
                 title=payload.query[:50] + "..." if len(payload.query) > 50 else payload.query
@@ -114,10 +108,19 @@ async def chat_message(
             await db.flush()
             conv_id = new_conv.id
 
+            # Link all pending documents to this new conversation
+            if payload.document_ids:
+                await db.execute(
+                    sa_update(Document)
+                    .where(Document.id.in_(payload.document_ids))
+                    .where(Document.user_id == current_user.id)
+                    .values(conversation_id=conv_id)
+                )
+
         new_chat = Chat(
             user_id=current_user.id,
             conversation_id=conv_id,
-            document_id=payload.document_id if payload.document_id else None,
+            document_id=payload.document_ids[0] if payload.document_ids else None,
             query=payload.query,
             answer=final_answer,
             sources=[{"document_id": c.document_id, "page": c.page, "text": c.text[:200]} for c in chunks],
@@ -150,6 +153,23 @@ async def list_conversations(
         "title": c.title,
         "updated_at": c.updated_at.isoformat()
     } for c in convs]
+
+@router.delete("/conversations/{conv_id}")
+async def delete_conversation(
+    conv_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a conversation and all its messages."""
+    from models.models import Conversation
+    conv = await db.get(Conversation, conv_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if str(conv.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    await db.delete(conv)
+    await db.commit()
+    return {"message": f"Conversation {conv_id} deleted"}
 
 @router.get("/history", response_model=List[ChatResponse])
 async def chat_history(

@@ -6,23 +6,10 @@ const ProjectContext = createContext(null)
 
 export function ProjectProvider({ children }) {
   const { isAuthenticated } = useAuth()
-  const [projects, setProjects] = useState([])
-  const [activeProject, setActiveProject] = useState(null)
   const [conversations, setConversations] = useState([])
   const [activeConversationId, setActiveConversationId] = useState(null)
-
-  const fetchProjects = useCallback(async () => {
-    if (!isAuthenticated) return []
-    try {
-      const r = await api.get('/documents/')
-      const docs = r.data.documents || []
-      setProjects(docs)
-      return docs
-    } catch (err) {
-      console.error('Failed to load documents', err)
-      return []
-    }
-  }, [isAuthenticated])
+  // conversationDocs: docs scoped to the currently active conversation
+  const [conversationDocs, setConversationDocs] = useState([])
 
   const fetchConversations = useCallback(async () => {
     if (!isAuthenticated) return
@@ -32,38 +19,60 @@ export function ProjectProvider({ children }) {
     } catch { /* silent */ }
   }, [isAuthenticated])
 
-  // Load on mount or when auth changes
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchProjects()
-      fetchConversations()
-    } else {
-      setProjects([])
-      setConversations([])
+  // Fetch documents scoped to a specific conversation
+  const fetchConversationDocs = useCallback(async (conversationId) => {
+    if (!conversationId) {
+      setConversationDocs([])
+      return []
     }
-  }, [isAuthenticated, fetchProjects, fetchConversations])
-
-  const addProject = useCallback((doc) => {
-    setProjects(prev => [doc, ...prev])
+    try {
+      const r = await api.get('/documents/', { params: { conversation_id: conversationId } })
+      const docs = r.data.documents || []
+      setConversationDocs(docs)
+      return docs
+    } catch (err) {
+      console.error('Failed to load conversation documents', err)
+      return []
+    }
   }, [])
 
-  const removeProject = useCallback((docId) => {
-    setProjects(prev => prev.filter(p => p.id !== docId))
-    if (activeProject?.id === docId) setActiveProject(null)
-  }, [activeProject])
+  // Load conversations on mount / auth change
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchConversations()
+    } else {
+      setConversations([])
+      setConversationDocs([])
+      setActiveConversationId(null)
+    }
+  }, [isAuthenticated, fetchConversations])
 
-  const resetForNewProject = useCallback(() => {
-    setActiveProject(null)
+  // When active conversation changes, fetch its documents
+  useEffect(() => {
+    if (activeConversationId) {
+      fetchConversationDocs(activeConversationId)
+    } else {
+      setConversationDocs([])
+    }
+  }, [activeConversationId, fetchConversationDocs])
+
+  const resetForNewChat = useCallback(() => {
     setActiveConversationId(null)
+    setConversationDocs([])
     localStorage.removeItem('forceHistory')
   }, [])
 
   return (
     <ProjectContext.Provider value={{
-      projects, setProjects, activeProject, setActiveProject,
-      conversations, fetchConversations,
+      // Conversations
+      conversations, setConversations, fetchConversations,
       activeConversationId, setActiveConversationId,
-      fetchProjects, addProject, removeProject, resetForNewProject,
+      // Per-conversation documents
+      conversationDocs, setConversationDocs, fetchConversationDocs,
+      // Helpers
+      resetForNewChat,
+      // Legacy aliases so nothing else breaks
+      resetForNewProject: resetForNewChat,
     }}>
       {children}
     </ProjectContext.Provider>

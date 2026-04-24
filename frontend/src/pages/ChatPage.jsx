@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import api from '../api/client'
+import api, { getValidToken } from '../api/client'
 import { Icon } from '../components/common/Icon'
 import { useAuth } from '../contexts/AuthContext'
 import { useProjects } from '../contexts/ProjectContext'
@@ -103,7 +103,7 @@ export default function ChatPage() {
     setSending(true)
 
     try {
-      const token = localStorage.getItem('token')
+      const token = await getValidToken()
       const response = await fetch(`${api.defaults.baseURL}/chat/message`, {
         method: 'POST',
         headers: {
@@ -202,7 +202,7 @@ export default function ChatPage() {
     if (activeConversationId) form.append('conversation_id', activeConversationId)
 
     try {
-      const token = localStorage.getItem('token')
+      const token = await getValidToken()
       const uploadResult = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest()
         xhr.open('POST', `${api.defaults.baseURL}/documents/upload`)

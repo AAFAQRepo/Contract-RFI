@@ -1,39 +1,72 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Icon } from '../common/Icon'
 
 /**
- * Collapsible thinking block for AI responses.
- * Auto-opens when thinking content first arrives.
+ * Premium collapsible thinking block inspired by Antigravity/Claude.
+ * Shows thought duration and has a clean, minimal UI.
  */
-export default function ThinkingBlock({ thinking }) {
+export default function ThinkingBlock({ thinking, isComplete }) {
   const [open, setOpen] = useState(false)
+  const [duration, setDuration] = useState(0)
+  const timerRef = useRef(null)
+  const startTimeRef = useRef(null)
 
+  // Auto-open when thinking content arrives
   useEffect(() => {
-    if (thinking && thinking.trim().length > 0) setOpen(true)
+    if (thinking && thinking.trim().length > 0) {
+      setOpen(true)
+    }
   }, [!!thinking])
 
-  if (!thinking) return null
+  // Timer logic
+  useEffect(() => {
+    if (thinking && !isComplete && !startTimeRef.current) {
+      startTimeRef.current = Date.now()
+      timerRef.current = setInterval(() => {
+        setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000))
+      }, 1000)
+    }
+
+    if (isComplete && timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [thinking, isComplete])
+
+  if (!thinking && !isComplete) return null
+  if (!thinking && isComplete) return null // Should not happen but for safety
 
   const renderedThinking = thinking.split('\n').map((line, i) => {
     const t = line.trim()
-    if (t.startsWith('-') || t.startsWith('*')) {
-      return <li key={i} style={{ marginBottom: 4 }}>{t.substring(1).trim()}</li>
-    }
-    return <p key={i} style={{ marginBottom: 4 }}>{t}</p>
+    if (!t) return <div key={i} style={{ height: '8px' }} />
+    return <p key={i}>{t}</p>
   })
 
   return (
-    <div className="thinking-block">
-      <button className="thinking-toggle" onClick={() => setOpen(v => !v)}>
-        <span className="thinking-dot-anim"></span>
-        <span>Thinking</span>
-        <span className={`thinking-chevron ${open ? 'open' : ''}`}></span>
-      </button>
+    <div className={`premium-thinking-block ${isComplete ? 'complete' : 'active'}`}>
+      <div className="premium-thinking-header" onClick={() => setOpen(v => !v)}>
+        <div className="premium-thinking-label">
+          {isComplete ? (
+            <span className="thought-duration">Thought for {duration}s</span>
+          ) : (
+            <span className="thinking-status">
+              <span className="thinking-spinner"></span>
+              Thinking...
+            </span>
+          )}
+        </div>
+        <div className={`premium-thinking-chevron ${open ? 'open' : ''}`}>
+          <Icon.ChevronDown />
+        </div>
+      </div>
+      
       {open && (
-        <div className="thinking-content">
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {renderedThinking}
-          </ul>
+        <div className="premium-thinking-content">
+          {renderedThinking}
         </div>
       )}
     </div>

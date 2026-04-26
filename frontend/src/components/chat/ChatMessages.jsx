@@ -19,12 +19,12 @@ export function UserMessage({ id, text, onDelete }) {
 /**
  * AI chat message — left-aligned with thinking block, sources, and action buttons.
  */
-export function AIMessage({ id, text, thinking, sources, onDelete }) {
+export function AIMessage({ id, text, thinking, thinkingComplete, sources, onDelete }) {
   const realId = id && String(id).startsWith('a-') ? String(id).slice(2) : id
 
   return (
     <div className="msg-ai">
-      <ThinkingBlock thinking={thinking} />
+      <ThinkingBlock thinking={thinking} isComplete={thinkingComplete} />
       <div className="msg-ai-body" dangerouslySetInnerHTML={{ __html: formatAIText(text) }} />
       {sources && sources.length > 0 && (
         <div className="msg-sources">

@@ -1,18 +1,12 @@
 """
 Chat API routes.
 
-Fixes applied (from audit):
-  CRITICAL-1 — HybridRetriever.search() is now async (wraps reranker in
-                run_in_executor); the event loop is never blocked.
-  CRITICAL-3 — Multi-document retrieval uses retriever.search_many(), which
-                fans out all per-doc dense+sparse+RRF concurrently via
-                asyncio.gather and runs ONE shared reranking pass so scores
-                across documents are comparable.
-  U-1        — Streaming response uses typed SSE events (thinking / token /
-                done) so the frontend can distinguish reasoning from answer
-                tokens without parsing raw XML.
-  U-2        — Source text snippet increased to 400 chars with an ellipsis
-                indicator; no longer silently truncates at 200.
+Retrieval pipeline:
+  1. Query intent classification (regex, zero LLM cost) → adaptive K values.
+  2. Dense + Sparse search run concurrently per document.
+  3. RRF fusion → single shared cross-encoder reranking pass.
+  4. Adaptive top-k cutoff → 3-8 final chunks.
+  5. Streaming response over typed SSE events (thinking / token / done).
 """
 
 import json
@@ -91,9 +85,9 @@ async def chat_message(
     start_time = time.time()
 
     # ── Step 1: Retrieve context ──────────────────────────────────────────────
-    # CRITICAL-3 FIX: search_many fans out all documents concurrently.
     # ISOLATION FIX: If document_ids is empty but conversation_id is provided,
-    # fetch the documents linked to that conversation to ensure isolation.
+    # look up what documents belong to this conversation. NEVER fall through to
+    # a global search when a conversation is active — that causes cross-chat leakage.
     search_doc_ids = payload.document_ids
     if not search_doc_ids and payload.conversation_id:
         from models.models import Document
@@ -109,13 +103,37 @@ async def chat_message(
             document_ids=search_doc_ids,
             top_k=8,
         )
-    else:
-        # Global / no-document mode
+    elif not payload.conversation_id:
+        # Only fall back to global search when there is NO active conversation.
+        # This handles the very first message before any document is uploaded.
         chunks = await retriever.search(
             query=payload.query,
             user_id=str(current_user.id),
             top_k=8,
         )
+    else:
+        # Conversation exists but has no linked documents yet — return empty context.
+        # The LLM will respond based on the system prompt alone (no cross-chat leakage).
+        chunks = []
+
+    # ── Step 1b: Fetch conversation history for multi-turn context ────────────
+    conversation_history = []
+    if payload.conversation_id:
+        hist_result = await db.execute(
+            select(Chat)
+            .where(
+                Chat.conversation_id == payload.conversation_id,
+                Chat.user_id == current_user.id,
+            )
+            .order_by(Chat.created_at.asc())
+            .limit(6)  # Last 3 Q/A pairs
+        )
+        past_chats = hist_result.scalars().all()
+        for past in past_chats:
+            if past.query:
+                conversation_history.append({"role": "user", "content": past.query})
+            if past.answer:
+                conversation_history.append({"role": "assistant", "content": past.answer})
 
     # ── Step 2: Stream tokens as typed SSE ───────────────────────────────────
     async def event_generator():
@@ -126,6 +144,7 @@ async def chat_message(
             query=payload.query,
             chunks=chunks,
             user_name=current_user.name or "User",
+            history=conversation_history,
         ):
             full_answer += token
 

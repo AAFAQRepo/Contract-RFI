@@ -181,10 +181,13 @@ export default function ChatPage() {
               
               if (event === 'thinking') {
                 return { ...msg, thinking: (msg.thinking || '') + (data.v || '') }
+              } else if (event === 'thinking_end') {
+                return { ...msg, thinkingComplete: true }
               } else if (event === 'token') {
-                return { ...msg, text: (msg.text || '') + (data.v || '') }
+                // If we get a token but thinking wasn't marked complete, do it now
+                return { ...msg, text: (msg.text || '') + (data.v || ''), thinkingComplete: true }
               } else if (event === 'done') {
-                return { ...msg, sources: data.sources || [] }
+                return { ...msg, sources: data.sources || [], thinkingComplete: true }
               }
               return msg
             }))
@@ -383,10 +386,14 @@ export default function ChatPage() {
               )}
               {sending && (
                 <div className="msg-ai">
-                  <div className="thinking-block" style={{ pointerEvents: 'none' }}>
-                    <div className="thinking-toggle" style={{ cursor: 'default' }}>
-                      <span className="thinking-dot-anim"></span>
-                      <span>Thinking…</span>
+                  <div className="premium-thinking-block active">
+                    <div className="premium-thinking-header" style={{ cursor: 'default' }}>
+                      <div className="premium-thinking-label">
+                        <span className="thinking-status">
+                          <span className="thinking-spinner"></span>
+                          Thinking...
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>

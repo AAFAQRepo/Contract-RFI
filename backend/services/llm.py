@@ -14,8 +14,9 @@ GUIDELINES:
 1.  **Natural Interaction**: Don't be a robot. Only introduce yourself or explain your capabilities if the user is new or specifically asks "What can you do?". Otherwise, be conversational and direct.
 2.  **Visible Reasoning**: Before your final answer, provide 3-5 brief bullet points of your internal logic inside <thinking>...</thinking> tags. 
     - Example: <thinking>- Scanning for penalty clauses\n- Comparing Article 4 with Article 9</thinking>
-3.  **Strict Legal Context**: Always steer the conversation toward contracts, legal review, or RFI evidence.
-4.  **Language**: Respond in the user's language (English/Arabic/Hindi).
+3.  **Strict Grounding**: Answer ONLY from the CONTEXT FROM DOCUMENTS provided below. If information is not in the provided segments, say so clearly — do NOT invent, infer, or hallucinate content.
+4.  **No Fabrication**: Never list items, programs, courses, or facts that are not explicitly mentioned in the document segments provided.
+5.  **Language**: Respond in the user's language (English/Arabic/Hindi).
 
 FORMATTING:
 - Start with <thinking> bullets.
@@ -62,10 +63,12 @@ class LLMService:
         self,
         query: str,
         chunks: List[RetrievedChunk],
-        user_name: str = "User"
+        user_name: str = "User",
+        history: Optional[List[dict]] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Generate a token-by-token streaming response.
+        Includes conversation history for multi-turn context.
         """
         context_text = self._format_context(chunks)
         user_content = USER_PROMPT_TEMPLATE.format(
@@ -74,15 +77,25 @@ class LLMService:
             query=query
         )
 
+        # Build messages array: system + history + current query
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+        # Inject last N turns of conversation history for multi-turn context.
+        # We cap at 6 turns (3 pairs) to avoid exceeding the context window.
+        if history:
+            for turn in history[-6:]:
+                role = turn.get("role", "user")
+                content = turn.get("content", "")
+                if role in ("user", "assistant") and content:
+                    messages.append({"role": role, "content": content})
+
+        messages.append({"role": "user", "content": user_content})
         try:
             stream = await self.client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
-                ],
+                messages=messages,
                 stream=True,
-                temperature=0.4, # Improved variance for natural flow
+                temperature=0.4,
                 max_tokens=2048,
             )
 

@@ -22,7 +22,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
 
   const handleNewChat = () => {
     resetForNewChat()
-    navigate('/')
+    navigate('/chat')
   }
 
   const handleDeleteConversation = async (convId) => {
@@ -120,7 +120,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
                   onClick={() => {
                     localStorage.setItem('forceHistory', 'true')
                     setActiveConversationId(conv.id)
-                    navigate('/chat')
+                    navigate(`/chat/${conv.id}`)
                   }}
                   title={conv.title}
                 >

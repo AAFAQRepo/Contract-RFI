@@ -91,14 +91,23 @@ async def chat_message(
     start_time = time.time()
 
     # ── Step 1: Retrieve context ──────────────────────────────────────────────
-    # CRITICAL-3 FIX: search_many fans out all documents concurrently and runs
-    # one shared reranking pass.  No more N×serial retrieval loops.
-    if payload.document_ids:
+    # CRITICAL-3 FIX: search_many fans out all documents concurrently.
+    # ISOLATION FIX: If document_ids is empty but conversation_id is provided,
+    # fetch the documents linked to that conversation to ensure isolation.
+    search_doc_ids = payload.document_ids
+    if not search_doc_ids and payload.conversation_id:
+        from models.models import Document
+        doc_result = await db.execute(
+            select(Document.id).where(Document.conversation_id == payload.conversation_id)
+        )
+        search_doc_ids = [str(d) for d in doc_result.scalars().all()]
+
+    if search_doc_ids:
         chunks: List[RetrievedChunk] = await retriever.search_many(
             query=payload.query,
             user_id=str(current_user.id),
-            document_ids=payload.document_ids,
-            top_k=8,   # R-2: hard cap; adaptive_cutoff may cut earlier
+            document_ids=search_doc_ids,
+            top_k=8,
         )
     else:
         # Global / no-document mode

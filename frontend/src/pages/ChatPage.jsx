@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import api, { getValidToken } from '../api/client'
 import { Icon } from '../components/common/Icon'
 import { useAuth } from '../contexts/AuthContext'
@@ -19,6 +20,8 @@ function getGreeting() {
 
 export default function ChatPage() {
   const { user } = useAuth()
+  const { id } = useParams()
+  const navigate = useNavigate()
   const {
     conversations, fetchConversations,
     activeConversationId, setActiveConversationId,
@@ -41,6 +44,16 @@ export default function ChatPage() {
 
   // Scroll to bottom on new messages
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+
+  // Sync URL ID to activeConversationId
+  useEffect(() => {
+    if (id && id !== activeConversationId) {
+      localStorage.setItem('forceHistory', 'true')
+      setActiveConversationId(id)
+    } else if (!id && activeConversationId) {
+      resetForNewChat()
+    }
+  }, [id, activeConversationId, setActiveConversationId, resetForNewChat])
 
   // Poll for processing status on pending files
   useEffect(() => {
@@ -137,7 +150,7 @@ export default function ChatPage() {
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let aiMessageId = Date.now() + 1
-      let fullContent = ''
+      let partialLine = ''
 
       setMessages(m => [...m, { id: aiMessageId, role: 'ai', text: '', thinking: '', sources: [] }])
 
@@ -146,47 +159,48 @@ export default function ChatPage() {
         if (done) break
 
         const chunk = decoder.decode(value, { stream: true })
-        fullContent += chunk
+        const lines = (partialLine + chunk).split('\n\n')
+        partialLine = lines.pop() || ''
 
-        let currentThinking = ''
-        let currentAnswer = fullContent
+        for (const line of lines) {
+          if (!line.trim()) continue
+          
+          // Parse SSE format:
+          // event: thinking\ndata: {"v": "token"}
+          const eventMatch = line.match(/^event: (.+)\ndata: (.+)$/m)
+          if (!eventMatch) continue
 
-        if (fullContent.includes('<thinking>')) {
-          const parts = fullContent.split('<thinking>')
-          if (fullContent.includes('</thinking>')) {
-            const innerParts = parts[1].split('</thinking>')
-            currentThinking = innerParts[0].trim()
-            currentAnswer = innerParts[1].trim()
-          } else {
-            currentThinking = parts[1].trim()
-            currentAnswer = ''
+          const event = eventMatch[1]
+          const dataStr = eventMatch[2]
+
+          try {
+            const data = JSON.parse(dataStr)
+            
+            setMessages(m => m.map(msg => {
+              if (msg.id !== aiMessageId) return msg
+              
+              if (event === 'thinking') {
+                return { ...msg, thinking: (msg.thinking || '') + (data.v || '') }
+              } else if (event === 'token') {
+                return { ...msg, text: (msg.text || '') + (data.v || '') }
+              } else if (event === 'done') {
+                return { ...msg, sources: data.sources || [] }
+              }
+              return msg
+            }))
+          } catch (e) {
+            console.warn('Failed to parse SSE data', e)
           }
         }
-
-        setMessages(m => m.map(msg =>
-          msg.id === aiMessageId
-            ? { ...msg, text: currentAnswer, thinking: currentThinking }
-            : msg
-        ))
       }
 
-      // After the first message, refresh conversations to show the new one in sidebar
-      // and fetch its scoped documents (the backend links them during this call)
-      await fetchConversations()
-      
-      // If this was a new conversation, the backend just created it.
-      // We need to figure out the new conversation ID.
-      // Re-fetch conversations and set the latest one as active.
+      // After message complete, if it was a new chat, sync the URL
       if (!activeConversationId) {
+        await fetchConversations()
         const r = await api.get('/chat/conversations')
         if (Array.isArray(r.data) && r.data.length > 0) {
-          const newConvId = r.data[0].id
-          localStorage.setItem('forceHistory', 'true')
-          setActiveConversationId(newConvId)
-          // Fetch and merge conversation docs to reflect the newly linked files
-          await fetchConversationDocs(newConvId)
-          // Clear pending files (they are now officially in the conversation)
-          setPendingFiles([])
+          const newId = r.data[0].id
+          navigate(`/chat/${newId}`, { replace: true })
         }
       }
 

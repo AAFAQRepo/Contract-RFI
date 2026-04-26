@@ -34,14 +34,15 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
 /* ── Left Sidebar ── */
 .sidebar {
   width: var(--sidebar-w);
-  min-width: var(--sidebar-w);
   background: #ffffff;
   border-right: 1px solid #eeeeee;
   display: flex;
   flex-direction: column;
-  overflow: visible;
+  overflow: hidden;
   z-index: 100;
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+  will-change: width;
 }
 
 .sidebar-logo {
@@ -80,8 +81,9 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
 }
 .sidebar-nav-item:hover { background: #f0f0f0; color: #111111; }
 .sidebar-nav-item.active { background: #eeeeee; color: #111111; font-weight: 600; }
-.sidebar-nav-item svg { opacity: 0.7; flex-shrink: 0; color: #555555; }
-.sidebar-nav-item.active svg { opacity: 1; color: #111111; }
+.sidebar-nav-item svg { opacity: 1; flex-shrink: 0; color: #1a1a1a; }
+.sidebar-nav-item.active svg { opacity: 1; color: #000000; }
+.sidebar-nav-item span { white-space: nowrap; overflow: hidden; }
 
 .sidebar-section-label {
   padding: 10px 18px 4px;
@@ -731,6 +733,16 @@ body:has(.landing-container)::-webkit-scrollbar-track {
   width: 52px;
   min-width: 52px;
 }
+
+/* Sidebar menu/hamburger toggle button */
+.sidebar-menu-btn {
+  flex-shrink: 0;
+  color: #1a1a1a !important;
+  background: none !important;
+  border: none !important;
+}
+.sidebar-menu-btn svg { color: #1a1a1a !important; opacity: 1 !important; }
+.sidebar-menu-btn:hover { background: #f0f0f0 !important; }
 .sidebar-icon-only {
   width: 36px;
   height: 36px;

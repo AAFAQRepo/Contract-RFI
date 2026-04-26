@@ -4,7 +4,7 @@ import Sidebar from '../components/sidebar/Sidebar'
 import SearchPanel from '../components/common/SearchPanel'
 
 export default function AppLayout() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [showSearch, setShowSearch] = useState(false)
 
   return (

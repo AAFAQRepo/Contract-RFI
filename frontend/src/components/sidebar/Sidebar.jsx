@@ -18,7 +18,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
     loadingConversations,
   } = useProjects()
 
-  const initial = user?.email?.charAt(0).toUpperCase() || 'U'
+  const initial = user?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || 'U'
 
   const handleNewChat = () => {
     resetForNewChat()
@@ -40,105 +40,105 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
     setCtxMenu(null)
   }
 
-  if (collapsed) {
-    return (
-      <nav className="sidebar sidebar-collapsed">
-        <div
-          className="sidebar-logo"
-          style={{ justifyContent: 'center', padding: '16px 0 8px', cursor: 'pointer' }}
-          onClick={() => setCollapsed(false)}
-        >
-          <Logo />
-        </div>
-        <div className="sidebar-nav" style={{ alignItems: 'center', gap: '8px', padding: '16px 0' }}>
-          <button className="sidebar-nav-item sidebar-icon-only" onClick={handleNewChat} title="New Chat"><Icon.Plus /></button>
-          <button className="sidebar-nav-item sidebar-icon-only" onClick={() => { setCollapsed(false); setShowSearch(true) }} title="Search"><Icon.Search /></button>
-          <button className="sidebar-nav-item sidebar-icon-only" title="Library"><Icon.Library /></button>
-          <button className="sidebar-nav-item sidebar-icon-only" title="Workflows"><Icon.Workflows /></button>
-        </div>
-        <div style={{ flex: 1 }} />
-        <div className="sidebar-bottom" style={{ alignItems: 'center', gap: '8px', paddingBottom: '16px' }}>
-          <button className="sidebar-nav-item sidebar-icon-only" title="Help"><Icon.Help /></button>
-          <div style={{ position: 'relative' }}>
-            <button className="sidebar-account-btn sidebar-icon-only" onClick={() => setShowAccount(v => !v)} style={{ justifyContent: 'center', border: 'none', background: 'none' }}>
-              <div className="account-avatar circle-avatar" style={{ margin: 0 }}>{initial}</div>
-            </button>
-            {showAccount && (
-              <>
-                <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setShowAccount(false)} />
-                <div style={{ position: 'absolute', bottom: '100%', left: 0, zIndex: 200 }}>
-                  <AccountDropdown onClose={() => setShowAccount(false)} onLogout={logout} user={user} />
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </nav>
-    )
-  }
-
   return (
-    <nav className="sidebar" style={{ position: 'relative' }}>
-      <div
-        className="sidebar-logo"
-        style={{ marginBottom: 6, cursor: 'pointer' }}
-        onClick={() => { setActiveConversationId(null); navigate('/') }}
-      >
-        <Logo />
-        <span className="sidebar-logo-text">Contract RFI</span>
-        <button className="sidebar-collapse-btn" onClick={(e) => { e.stopPropagation(); setCollapsed(true) }} title="Collapse sidebar">
-          <Icon.Collapse />
+    <nav className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}>
+      {/* ── Top: Menu toggle + Logo ── */}
+      <div className="sidebar-logo" style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}>
+        <button
+          className="sidebar-icon-only sidebar-menu-btn"
+          onClick={() => setCollapsed(v => !v)}
+          title={collapsed ? 'Open sidebar' : 'Close sidebar'}
+        >
+          <Icon.Menu />
         </button>
+
+        {!collapsed && (
+          <>
+            <span className="sidebar-logo-text" style={{ transition: 'opacity 0.4s', opacity: collapsed ? 0 : 1 }}>
+              Contract RFI
+            </span>
+          </>
+        )}
       </div>
 
+      {/* ── Nav items ── */}
       <div className="sidebar-nav">
-        <button className="sidebar-nav-item" onClick={handleNewChat} id="new-project-btn">
-          <Icon.Plus /> New chat
+        <button
+          className="sidebar-nav-item"
+          onClick={handleNewChat}
+          id="new-project-btn"
+          title="New chat"
+          style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
+        >
+          <Icon.Plus />
+          {!collapsed && <span>New chat</span>}
         </button>
-        <button className="sidebar-nav-item" onClick={() => setShowSearch(true)} id="search-projects-btn">
-          <Icon.Search /> Search
+        <button
+          className="sidebar-nav-item"
+          onClick={() => { if (collapsed) setCollapsed(false); setShowSearch(true) }}
+          id="search-projects-btn"
+          title="Search"
+          style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
+        >
+          <Icon.Search />
+          {!collapsed && <span>Search</span>}
         </button>
-        <button className="sidebar-nav-item">
-          <Icon.Library /> Library
+        <button
+          className="sidebar-nav-item"
+          title="Library"
+          style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
+        >
+          <Icon.Library />
+          {!collapsed && <span>Library</span>}
         </button>
-        <button className="sidebar-nav-item">
-          <Icon.Workflows /> Workflows
+        <button
+          className="sidebar-nav-item"
+          title="Workflows"
+          style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
+        >
+          <Icon.Workflows />
+          {!collapsed && <span>Workflows</span>}
         </button>
       </div>
 
-      {/* Conversations list — with skeleton loading */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 8px' }}>
-        {loadingConversations ? (
-          <>
-            <div className="sidebar-skeleton-item skeleton" />
-            <div className="sidebar-skeleton-item skeleton" style={{ width: '70%' }} />
-            <div className="sidebar-skeleton-item skeleton" style={{ width: '85%' }} />
-          </>
-        ) : conversations.length > 0 ? (
-          <>
-            <div className="sidebar-section-label">Conversations</div>
-            {conversations.map(conv => (
-              <div
-                key={conv.id}
-                className={`sidebar-project-item ${activeConversationId === conv.id ? 'active' : ''}`}
-                onClick={() => {
-                  localStorage.setItem('forceHistory', 'true')
-                  setActiveConversationId(conv.id)
-                  navigate('/chat')
-                }}
-                title={conv.title}
-              >
-                <span className="sidebar-project-name">{conv.title}</span>
-                <button
-                  className="sidebar-project-more"
-                  onClick={e => { e.stopPropagation(); setCtxMenu({ id: conv.id, x: e.clientX, y: e.clientY }) }}
-                ><Icon.More /></button>
-              </div>
-            ))}
-          </>
-        ) : null}
-      </div>
+      {/* ── Conversations (hidden when collapsed) ── */}
+      {!collapsed && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 8px' }}>
+          {loadingConversations ? (
+            <>
+              <div className="sidebar-skeleton-item skeleton" />
+              <div className="sidebar-skeleton-item skeleton" style={{ width: '70%' }} />
+              <div className="sidebar-skeleton-item skeleton" style={{ width: '85%' }} />
+            </>
+          ) : conversations.length > 0 ? (
+            <>
+              <div className="sidebar-section-label">Conversations</div>
+              {conversations.map(conv => (
+                <div
+                  key={conv.id}
+                  className={`sidebar-project-item ${activeConversationId === conv.id ? 'active' : ''}`}
+                  onClick={() => {
+                    localStorage.setItem('forceHistory', 'true')
+                    setActiveConversationId(conv.id)
+                    navigate('/chat')
+                  }}
+                  title={conv.title}
+                >
+                  <span className="sidebar-project-name">{conv.title}</span>
+                  <button
+                    className="sidebar-project-more"
+                    onClick={e => { e.stopPropagation(); setCtxMenu({ id: conv.id, x: e.clientX, y: e.clientY }) }}
+                  ><Icon.More /></button>
+                </div>
+              ))}
+            </>
+          ) : null}
+        </div>
+      )}
 
+      {collapsed && <div style={{ flex: 1 }} />}
+
+      {/* ── Context menu ── */}
       {ctxMenu && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setCtxMenu(null)} />
@@ -148,13 +148,28 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
         </>
       )}
 
-      <div className="sidebar-bottom">
-        <button className="sidebar-nav-item"><Icon.Help /> Help</button>
+      {/* ── Bottom: Help + Account ── */}
+      <div className="sidebar-bottom" style={{ alignItems: collapsed ? 'center' : 'stretch' }}>
+        <button
+          className="sidebar-nav-item"
+          title="Help"
+          style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
+        >
+          <Icon.Help />
+          {!collapsed && <span>Help</span>}
+        </button>
+
         <div style={{ position: 'relative' }}>
-          <button className="sidebar-account-btn" id="account-btn" onClick={() => setShowAccount(v => !v)}>
-            <div className="account-avatar circle-avatar">{initial}</div>
-            {user?.name || 'Account'}
+          <button
+            className="sidebar-account-btn"
+            id="account-btn"
+            onClick={() => setShowAccount(v => !v)}
+            style={{ justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '8px 0' : '8px 10px' }}
+          >
+            <div className="account-avatar" title={user?.name || 'Account'}>{initial}</div>
+            {!collapsed && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.name || 'Account'}</span>}
           </button>
+
           {showAccount && (
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setShowAccount(false)} />

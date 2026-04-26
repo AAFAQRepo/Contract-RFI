@@ -40,7 +40,7 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   flex-direction: column;
   overflow: hidden;
   z-index: 100;
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
   will-change: width;
 }
@@ -53,16 +53,7 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
 }
 
 .sidebar-logo svg { flex-shrink: 0; }
-.sidebar-logo-text { 
-  font-size: 0.85rem; 
-  font-weight: 700; 
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  transition: opacity 0.2s ease, width 0.2s ease, margin 0.2s ease;
-  width: auto;
-  opacity: 1;
-}
+.sidebar-logo-text { font-size: 0.85rem; font-weight: 700; color: var(--text); }
 
 .sidebar-nav {
   padding: 4px 8px;
@@ -92,12 +83,7 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
 .sidebar-nav-item.active { background: #eeeeee; color: #000000; font-weight: 600; }
 .sidebar-nav-item svg { opacity: 1; flex-shrink: 0; color: #000000; }
 .sidebar-nav-item.active svg { opacity: 1; color: #000000; }
-.sidebar-nav-item span { 
-  white-space: nowrap; 
-  overflow: hidden;
-  transition: opacity 0.2s ease, width 0.2s ease;
-  opacity: 1;
-}
+.sidebar-nav-item span { white-space: nowrap; overflow: hidden; }
 
 .sidebar-section-label {
   padding: 10px 18px 4px;
@@ -106,9 +92,6 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  white-space: nowrap;
-  overflow: hidden;
-  transition: opacity 0.2s ease;
 }
 
 .sidebar-project-item {
@@ -126,13 +109,7 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
 }
 .sidebar-project-item:hover { background: var(--bg-hover); }
 .sidebar-project-item.active { background: var(--bg-selected); }
-.sidebar-project-name { 
-  white-space: nowrap; 
-  overflow: hidden; 
-  text-overflow: ellipsis; 
-  flex: 1;
-  transition: opacity 0.2s ease;
-}
+.sidebar-project-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
 .sidebar-project-more {
   opacity: 0;
   padding: 2px 4px;
@@ -170,12 +147,6 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   position: relative;
 }
 .sidebar-account-btn:hover { background: var(--bg-hover); color: var(--text); }
-.sidebar-account-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: opacity 0.2s ease;
-}
 
 .account-avatar {
   width: 28px;
@@ -759,36 +730,8 @@ body:has(.landing-container)::-webkit-scrollbar-track {
 
 /* ── Collapsed Sidebar ── */
 .sidebar-collapsed {
-  width: 60px; /* Slightly wider for better icon centering */
-  min-width: 60px;
-}
-
-.sidebar-collapsed .sidebar-logo-text,
-.sidebar-collapsed .sidebar-nav-item span,
-.sidebar-collapsed .sidebar-section-label,
-.sidebar-collapsed .sidebar-project-name,
-.sidebar-collapsed .sidebar-project-more,
-.sidebar-collapsed .sidebar-account-name {
-  opacity: 0;
-  pointer-events: none;
-  width: 0;
-  padding: 0;
-  margin: 0;
-  overflow: hidden; /* Prevent text overflow during shrink */
-}
-
-.sidebar-collapsed .sidebar-content-area {
-  overflow: hidden !important;
-}
-
-.sidebar-collapsed .sidebar-nav-item {
-  justify-content: center;
-  padding: 8px 0;
-}
-
-.sidebar-collapsed .sidebar-logo {
-  justify-content: center;
-  padding: 16px 0 8px;
+  width: 48px;
+  min-width: 48px;
 }
 
 /* Sidebar menu/hamburger toggle button */

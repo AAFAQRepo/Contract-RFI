@@ -52,9 +52,13 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           <Icon.Menu />
         </button>
 
-        <span className="sidebar-logo-text">
-          Contract RFI
-        </span>
+        {!collapsed && (
+          <>
+            <span className="sidebar-logo-text" style={{ transition: 'opacity 0.4s', opacity: collapsed ? 0 : 1 }}>
+              Contract RFI
+            </span>
+          </>
+        )}
       </div>
 
       {/* ── Nav items ── */}
@@ -67,7 +71,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Plus />
-          <span>New chat</span>
+          {!collapsed && <span>New chat</span>}
         </button>
         <button
           className="sidebar-nav-item"
@@ -77,7 +81,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Search />
-          <span>Search</span>
+          {!collapsed && <span>Search</span>}
         </button>
         <button
           className="sidebar-nav-item"
@@ -85,7 +89,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Library />
-          <span>Library</span>
+          {!collapsed && <span>Library</span>}
         </button>
         <button
           className="sidebar-nav-item"
@@ -93,42 +97,46 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Workflows />
-          <span>Workflows</span>
+          {!collapsed && <span>Workflows</span>}
         </button>
       </div>
 
-      {/* ── Conversations ── */}
-      <div className="sidebar-content-area" style={{ flex: 1, overflowY: 'auto', padding: '0 0 8px' }}>
-        {loadingConversations ? (
-          <div className="sidebar-skeleton-container">
-            <div className="sidebar-skeleton-item skeleton" />
-            <div className="sidebar-skeleton-item skeleton" style={{ width: '70%' }} />
-            <div className="sidebar-skeleton-item skeleton" style={{ width: '85%' }} />
-          </div>
-        ) : conversations.length > 0 ? (
-          <>
-            <div className="sidebar-section-label">Conversations</div>
-            {conversations.map(conv => (
-              <div
-                key={conv.id}
-                className={`sidebar-project-item ${activeConversationId === conv.id ? 'active' : ''}`}
-                onClick={() => {
-                  localStorage.setItem('forceHistory', 'true')
-                  setActiveConversationId(conv.id)
-                  navigate('/chat')
-                }}
-                title={conv.title}
-              >
-                <span className="sidebar-project-name">{conv.title}</span>
-                <button
-                  className="sidebar-project-more"
-                  onClick={e => { e.stopPropagation(); setCtxMenu({ id: conv.id, x: e.clientX, y: e.clientY }) }}
-                ><Icon.More /></button>
-              </div>
-            ))}
-          </>
-        ) : null}
-      </div>
+      {/* ── Conversations (hidden when collapsed) ── */}
+      {!collapsed && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 8px' }}>
+          {loadingConversations ? (
+            <>
+              <div className="sidebar-skeleton-item skeleton" />
+              <div className="sidebar-skeleton-item skeleton" style={{ width: '70%' }} />
+              <div className="sidebar-skeleton-item skeleton" style={{ width: '85%' }} />
+            </>
+          ) : conversations.length > 0 ? (
+            <>
+              <div className="sidebar-section-label">Conversations</div>
+              {conversations.map(conv => (
+                <div
+                  key={conv.id}
+                  className={`sidebar-project-item ${activeConversationId === conv.id ? 'active' : ''}`}
+                  onClick={() => {
+                    localStorage.setItem('forceHistory', 'true')
+                    setActiveConversationId(conv.id)
+                    navigate('/chat')
+                  }}
+                  title={conv.title}
+                >
+                  <span className="sidebar-project-name">{conv.title}</span>
+                  <button
+                    className="sidebar-project-more"
+                    onClick={e => { e.stopPropagation(); setCtxMenu({ id: conv.id, x: e.clientX, y: e.clientY }) }}
+                  ><Icon.More /></button>
+                </div>
+              ))}
+            </>
+          ) : null}
+        </div>
+      )}
+
+      {collapsed && <div style={{ flex: 1 }} />}
 
       {/* ── Context menu ── */}
       {ctxMenu && (
@@ -148,7 +156,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Help />
-          <span>Help</span>
+          {!collapsed && <span>Help</span>}
         </button>
 
         <div style={{ position: 'relative' }}>
@@ -159,7 +167,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
             style={{ justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '8px 0' : '8px 10px' }}
           >
             <div className="account-avatar" title={user?.name || 'Account'}>{initial}</div>
-            <span className="sidebar-account-name">{user?.name || 'Account'}</span>
+            {!collapsed && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.name || 'Account'}</span>}
           </button>
 
           {showAccount && (

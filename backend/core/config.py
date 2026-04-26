@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     USE_GPU_SERVER: bool = False
     GPU_SERVER_IP: str = "localhost"
 
+    # ── CORS ──
+    # Comma-separated list of allowed origins.  A-1 FIX: was hardcoded in main.py.
+    # Example: ALLOWED_ORIGINS=http://localhost:5173,https://app.yourdomain.com
+    ALLOWED_ORIGINS: str = "http://localhost:5173"
+
     # ── SMTP (Email) ──
     SMTP_HOST: str = "smtp.email.eu-frankfurt-1.oci.oraclecloud.com"
     SMTP_PORT: int = 587

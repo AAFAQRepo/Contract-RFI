@@ -1,6 +1,11 @@
 """
 Document management endpoints — upload, list, get, status.
-Phase 1B: fully implemented.
+
+Fixes applied (from audit):
+  CRITICAL-5 — get_document and get_document_status now require authentication
+               and verify that the requesting user owns the document (IDOR fix).
+  A-2        — get_document_status uses SQL COUNT / GROUP BY instead of loading
+               all chunk ORM objects into memory to count them.
 """
 
 import uuid
@@ -9,7 +14,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Form
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from typing import Optional
 
 from core.database import get_db
@@ -138,11 +143,20 @@ async def list_documents(
 
 
 @router.get("/{doc_id}")
-async def get_document(doc_id: str, db: AsyncSession = Depends(get_db)):
-    """Get document metadata."""
+async def get_document(
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get document metadata.
+    CRITICAL-5 FIX: requires auth + ownership verification (IDOR fix).
+    """
     doc = await db.get(Document, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    if str(doc.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not allowed")
     return {
         "id": str(doc.id),
         "filename": doc.filename,
@@ -160,30 +174,42 @@ async def get_document(doc_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{doc_id}/status")
-async def get_document_status(doc_id: str, db: AsyncSession = Depends(get_db)):
-    """Get document processing status — used for polling from frontend."""
+async def get_document_status(
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get document processing status — used for polling from frontend.
+    CRITICAL-5 FIX: requires auth + ownership verification (IDOR fix).
+    A-2 FIX: uses SQL COUNT/GROUP BY instead of loading all chunk rows.
+    """
     doc = await db.get(Document, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    if str(doc.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not allowed")
 
     extra = {}
     if doc.status == "ready":
-        # Count chunks
-        result = await db.execute(
-            select(Chunk).where(Chunk.document_id == doc_id)
+        # A-2 FIX: COUNT via SQL, never load chunk text into memory.
+        count_result = await db.execute(
+            select(Chunk.chunk_type, func.count(Chunk.id).label("cnt"))
+            .where(Chunk.document_id == doc_id)
+            .group_by(Chunk.chunk_type)
         )
-        chunks = result.scalars().all()
-        extra["retrieval_chunks"] = sum(1 for c in chunks if c.chunk_type == "retrieval")
-        extra["analysis_chunks"] = sum(1 for c in chunks if c.chunk_type == "analysis")
+        counts = {row.chunk_type: row.cnt for row in count_result.all()}
+        extra["retrieval_chunks"] = counts.get("retrieval", 0)
+        extra["analysis_chunks"]  = counts.get("analysis", 0)
 
     return {
-        "document_id": doc_id,
-        "status": doc.status,
+        "document_id":    doc_id,
+        "status":         doc.status,
         "processing_step": doc.processing_step,
         "progress_percent": doc.progress_percent,
-        "language": doc.language,
-        "page_count": doc.page_count,
-        "error_message": doc.error_message,
+        "language":       doc.language,
+        "page_count":     doc.page_count,
+        "error_message":  doc.error_message,
         **extra,
     }
 

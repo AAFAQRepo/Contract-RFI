@@ -9,6 +9,13 @@ process_document — full ingestion pipeline:
   5. Embed chunks → Qdrant
   6. Store chunks → PostgreSQL
   7. Update document status
+
+Fixes applied (from audit):
+  CRITICAL-4 — Both tasks now use SQLAlchemy context managers (with Session())
+               and call session.rollback() before any status update on the
+               exception path.  Previously, a DB error would trigger a second
+               commit() on a broken transaction, masking the original exception
+               and potentially leaking the session.
 """
 
 import os
@@ -114,95 +121,93 @@ def finalize_document_ingestion(results, document_id: str, user_id: str, filenam
 
     engine = create_engine(settings.DATABASE_URL_SYNC)
     Session = sessionmaker(bind=engine)
-    session = Session()
 
-    def _update_status(sess, status: str, step: str = None, progress: int = None, error: str = None):
-        doc = sess.get(Document, document_id)
-        if doc:
-            doc.status = status
-            doc.updated_at = datetime.utcnow()
-            if step:
-                doc.processing_step = step
-            if progress is not None:
-                doc.progress_percent = progress
-            if error:
-                doc.error_message = error
-            sess.commit()
+    # CRITICAL-4 FIX: use context manager — guarantees session.close() even on
+    # unexpected exceptions and prevents double-commit on the error path.
+    with Session() as session:
+        def _update_status(sess, status: str, step: str = None, progress: int = None, error: str = None):
+            doc = sess.get(Document, document_id)
+            if doc:
+                doc.status = status
+                doc.updated_at = datetime.utcnow()
+                if step:     doc.processing_step  = step
+                if progress is not None: doc.progress_percent = progress
+                if error:    doc.error_message    = error
+                sess.commit()
 
-    try:
-        print(f"🏁 Merging results for {document_id} ({len(all_lc_docs)} chunks total)")
-        _update_status(session, "processing", step="Merging results", progress=50)
+        try:
+            print(f"🏁 Merging results for {document_id} ({len(all_lc_docs)} chunks total)")
+            _update_status(session, "processing", step="Merging results", progress=50)
 
-        # 1. Detect language
-        language = detect_language(merged_full_text)
-        print(f"🌐 Merged language detection: {language}")
+            # 1. Detect language
+            language = detect_language(merged_full_text)
+            print(f"🌐 Merged language detection: {language}")
 
-        # 2. Update document metadata
-        doc = session.get(Document, document_id)
-        if doc:
-            doc.language = language
-            doc.page_count = total_page_count
-            doc.updated_at = datetime.utcnow()
-            session.commit()
+            # 2. Update document metadata
+            doc = session.get(Document, document_id)
+            if doc:
+                doc.language   = language
+                doc.page_count = total_page_count
+                doc.updated_at = datetime.utcnow()
+                session.commit()
 
-        _update_status(session, "processing", step="Saving to database", progress=70)
+            _update_status(session, "processing", step="Saving to database", progress=70)
 
-        # 3. Store pre-computed chunks in Qdrant (NO inference here)
-        print(f"💾 Storing {len(all_lc_docs)} merged chunks in Qdrant (using pre-computed vectors)...")
-        from services.embedding import store_precomputed_chunks_in_qdrant
-        point_ids = store_precomputed_chunks_in_qdrant(
-            all_lc_docs, 
-            all_embeddings, 
-            document_id, 
-            user_id, 
-            language
-        )
-        _update_status(session, "processing", step="Finalizing database", progress=90)
+            # 3. Store pre-computed chunks in Qdrant
+            print(f"💾 Storing {len(all_lc_docs)} merged chunks in Qdrant (using pre-computed vectors)...")
+            from services.embedding import store_precomputed_chunks_in_qdrant
+            point_ids = store_precomputed_chunks_in_qdrant(
+                all_lc_docs, all_embeddings, document_id, user_id, language
+            )
+            _update_status(session, "processing", step="Finalizing database", progress=90)
 
-        # 4. Store chunks in PostgreSQL
-        print(f"💾 Storing {len(all_lc_docs)} chunks in database...")
-        db_chunks = []
+            # 4. Store chunks in PostgreSQL
+            print(f"💾 Storing {len(all_lc_docs)} chunks in database...")
+            db_chunks = []
+            for lc_doc, point_id in zip(all_lc_docs, point_ids):
+                meta     = lc_doc.metadata or {}
+                dl_meta  = meta.get("dl_meta", {})
+                headings = dl_meta.get("headings", [])
+                section  = headings[0] if headings else ""
 
-        for lc_doc, point_id in zip(all_lc_docs, point_ids):
-            meta = lc_doc.metadata or {}
-            dl_meta = meta.get("dl_meta", {})
-            headings = dl_meta.get("headings", [])
-            section = headings[0] if headings else ""
-
-            # Extract page number (already adjusted by offset in the worker)
-            page = 0
-            doc_items = dl_meta.get("doc_items", [])
-            if doc_items:
-                for item in doc_items:
+                page = 0
+                for item in dl_meta.get("doc_items", []):
                     for prov in item.get("prov", []):
                         if prov.get("page_no", 0) > page:
                             page = prov["page_no"]
 
-            db_chunks.append(Chunk(
-                id=str(_uuid.uuid4()),
-                document_id=document_id,
-                chunk_type="retrieval",
-                text=lc_doc.page_content,
-                context_summary=f"[Page {page}] {section}".strip() if page else section,
-                section=section,
-                page=page,
-                language=language,
-                token_count=len(lc_doc.page_content.split()),
-                qdrant_point_id=point_id,
-            ))
+                db_chunks.append(Chunk(
+                    id=str(_uuid.uuid4()),
+                    document_id=document_id,
+                    chunk_type="retrieval",
+                    text=lc_doc.page_content,
+                    context_summary=f"[Page {page}] {section}".strip() if page else section,
+                    section=section,
+                    page=page,
+                    language=language,
+                    token_count=len(lc_doc.page_content.split()),
+                    qdrant_point_id=point_id,
+                ))
 
-        session.add_all(db_chunks)
-        _update_status(session, "ready", step="Completed", progress=100)
-        session.commit()
+            session.add_all(db_chunks)
+            _update_status(session, "ready", step="Completed", progress=100)
+            session.commit()
+            print(f"✅ Parallel processing for {document_id} completed")
 
-        print(f"✅ Parallel processing for {document_id} completed")
-
-    except Exception as exc:
-        print(f"❌ Finalization failed for {document_id}: {exc}")
-        _update_status(session, "error", error=str(exc))
-        session.commit()
-    finally:
-        session.close()
+        except Exception as exc:
+            print(f"❌ Finalization failed for {document_id}: {exc}")
+            # CRITICAL-4 FIX: rollback the broken transaction BEFORE attempting
+            # _update_status. Without this, commit() inside _update_status
+            # would raise a second exception on a dirty session, masking the
+            # original error and potentially deadlocking the session.
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            try:
+                _update_status(session, "error", error=str(exc))
+            except Exception as status_exc:
+                print(f"⚠️  Could not update error status for {document_id}: {status_exc}")
 
 
 @celery_app.task(name="workers.process_document", bind=True, max_retries=3)
@@ -223,84 +228,86 @@ def process_document(self, document_id: str, user_id: str, object_name: str, fil
 
     engine = create_engine(settings.DATABASE_URL_SYNC)
     Session = sessionmaker(bind=engine)
-    session = Session()
 
-    def _update_status(sess, status: str, step: str = None, progress: int = None, error: str = None):
-        doc = sess.get(Document, document_id)
-        if doc:
-            doc.status = status
-            doc.updated_at = datetime.utcnow()
-            if step:
-                doc.processing_step = step
-            if progress is not None:
-                doc.progress_percent = progress
-            if error:
-                doc.error_message = error
-            sess.commit()
+    # CRITICAL-4 FIX: context manager guarantees session cleanup; session is
+    # closed BEFORE chord dispatch so it doesn't stay open during async chord
+    # propagation through Redis.
+    with Session() as session:
+        def _update_status(sess, status: str, step: str = None, progress: int = None, error: str = None):
+            doc = sess.get(Document, document_id)
+            if doc:
+                doc.status = status
+                doc.updated_at = datetime.utcnow()
+                if step:     doc.processing_step  = step
+                if progress is not None: doc.progress_percent = progress
+                if error:    doc.error_message    = error
+                sess.commit()
 
-    try:
-        # Pre-check existence
-        doc = session.get(Document, document_id)
-        if not doc:
-            raise self.retry(countdown=2)
+        try:
+            doc = session.get(Document, document_id)
+            if not doc:
+                raise self.retry(countdown=2)
 
-        print(f"⏳ Starting parallel ingestion for {document_id}")
-        _update_status(session, "processing", step="Downloading", progress=10)
+            print(f"⏳ Starting parallel ingestion for {document_id}")
+            _update_status(session, "processing", step="Downloading", progress=10)
 
-        # 1. Download
-        file_bytes = download_document(object_name)
+            # 1. Download
+            file_bytes = download_document(object_name)
 
-        # 2. Coordinate Extraction
-        ext = filename.lower().split('.')[-1]
-        
-        if ext == 'pdf':
-            # Dynamic splitting logic: target ~75 pages per worker, capped at 8 workers
-            # For scanned docs, we target ~15 pages per worker for better OCR parallelism
-            from services.extraction import is_scanned_pdf_fast_bytes
-            is_scanned = is_scanned_pdf_fast_bytes(file_bytes)
-            
-            import fitz
-            doc = fitz.open(stream=file_bytes, filetype="pdf")
-            total_pages = len(doc)
-            doc.close()
-            
-            if is_scanned:
-                num_segments = max(2, min(12, (total_pages + 14) // 15))
-                type_msg = "Scanned PDF"
+            # 2. Coordinate Extraction
+            ext = filename.lower().split('.')[-1]
+
+            if ext == 'pdf':
+                from services.extraction import is_scanned_pdf_fast_bytes
+                is_scanned  = is_scanned_pdf_fast_bytes(file_bytes)
+
+                import fitz
+                tmp_doc     = fitz.open(stream=file_bytes, filetype="pdf")
+                total_pages = len(tmp_doc)
+                tmp_doc.close()
+
+                if is_scanned:
+                    num_segments = max(2, min(12, (total_pages + 14) // 15))
+                    type_msg     = "Scanned PDF"
+                else:
+                    num_segments = max(2, min(8, (total_pages + 74) // 75))
+                    type_msg     = "Digital PDF"
+
+                print(f"🔀 {type_msg} detected ({total_pages} pages): splitting into {num_segments} parallel segments")
+                _update_status(session, "processing", step=f"Splitting {type_msg} into {num_segments} parts", progress=20)
+                segments = split_pdf_into_chunks(file_bytes, n=num_segments)
             else:
-                num_segments = max(2, min(8, (total_pages + 74) // 75))
-                type_msg = "Digital PDF"
-                
-            print(f"🔀 {type_msg} detected ({total_pages} pages): splitting into {num_segments} parallel segments")
-            _update_status(session, "processing", step=f"Splitting {type_msg} into {num_segments} parts", progress=20)
-            segments = split_pdf_into_chunks(file_bytes, n=num_segments)
-        else:
-            # Single segment for non-PDFs
-            segments = [(file_bytes, 0)]
+                segments = [(file_bytes, 0)]
 
-        # 3. Create Chord: Map (Extract) -> Reduce (Finalize)
-        _update_status(session, "processing", step=f"Dispatching {len(segments)} workers", progress=30)
-        
-        callback = finalize_document_ingestion.s(
-            document_id=document_id,
-            user_id=user_id,
-            filename=filename
-        )
-        
-        header = [
-            extract_chunk_task.s(chunk_bytes, filename, offset)
-            for chunk_bytes, offset in segments
-        ]
-        
-        chord(header)(callback)
-        
-        print(f"📡 Coordination complete for {document_id}. Workers dispatched.")
-        return {"status": "dispatched", "parts": len(segments)}
+            # 3. Build chord BEFORE closing the session
+            _update_status(session, "processing", step=f"Dispatching {len(segments)} workers", progress=30)
 
-    except Exception as exc:
-        print(f"❌ Coordination failed for {document_id}: {exc}")
-        _update_status(session, "error", error=str(exc))
-        session.commit()
-        raise self.retry(exc=exc, countdown=2 ** self.request.retries)
-    finally:
-        session.close()
+            callback = finalize_document_ingestion.s(
+                document_id=document_id,
+                user_id=user_id,
+                filename=filename,
+            )
+            header = [
+                extract_chunk_task.s(chunk_bytes, filename, offset)
+                for chunk_bytes, offset in segments
+            ]
+
+            # Session is closed by context manager here (before chord dispatch)
+            # CRITICAL-4 FIX: prevents session leak during chord propagation.
+
+        except Exception as exc:
+            print(f"❌ Coordination failed for {document_id}: {exc}")
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            try:
+                _update_status(session, "error", error=str(exc))
+            except Exception as status_exc:
+                print(f"⚠️  Could not update error status: {status_exc}")
+            raise self.retry(exc=exc, countdown=2 ** self.request.retries)
+
+    # Dispatch chord AFTER session is fully closed (context manager exited)
+    chord(header)(callback)
+    print(f"📡 Coordination complete for {document_id}. Workers dispatched.")
+    return {"status": "dispatched", "parts": len(segments)}

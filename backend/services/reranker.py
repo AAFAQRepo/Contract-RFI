@@ -5,7 +5,11 @@ Uses BAAI/bge-reranker-v2-m3 (multilingual, supports Arabic + English).
 Takes a list of candidate chunks and re-scores them against the user query,
 returning the top-k most relevant chunks in order.
 
-Model size: ~280MB — loaded once and cached.
+Fixes applied (from audit):
+  R-3 — max_length raised from 512 → 1024.
+        HybridChunker produces chunks up to 600 tokens; after adding the
+        query, the previous 512-token cap was silently truncating chunk
+        content and scoring degraded partial text.
 """
 
 from typing import Optional
@@ -14,7 +18,7 @@ from core.config import get_settings
 
 settings = get_settings()
 
-# ── Model (loaded once) ────────────────────────────────────────────────────
+# ── Model (loaded once at first call) ─────────────────────────────────────────
 _reranker: Optional[CrossEncoder] = None
 
 RERANKER_MODEL = getattr(settings, "RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
@@ -23,8 +27,10 @@ RERANKER_MODEL = getattr(settings, "RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 def get_reranker() -> CrossEncoder:
     global _reranker
     if _reranker is None:
-        print(f"⏳ Loading reranker: {RERANKER_MODEL}")
-        _reranker = CrossEncoder(RERANKER_MODEL, max_length=512)
+        print(f"⏳ Loading reranker: {RERANKER_MODEL}  (max_length=1024)")
+        # R-3 FIX: 512 → 1024.  bge-reranker-v2-m3 supports 1024 tokens.
+        # Previous value silently truncated chunks >512 tokens, scoring partial text.
+        _reranker = CrossEncoder(RERANKER_MODEL, max_length=1024)
         print("✅ Reranker loaded")
     return _reranker
 
@@ -33,28 +39,24 @@ def get_reranker() -> CrossEncoder:
 
 def rerank_chunks(
     query: str,
-    chunks,  # list[RetrievedChunk]
+    chunks,          # list[RetrievedChunk]
     top_k: int = 5,
 ) -> list:
     """
     Re-score `chunks` against `query` using the cross-encoder.
     Returns the top `top_k` chunks sorted by reranker score (highest first).
 
-    The cross-encoder reads the full (query, chunk_text) pair, making it far
-    more accurate than cosine similarity alone.
+    NOTE: This function is intentionally synchronous.  It must be called via
+    asyncio.run_in_executor in any async context (enforced in retrieval.py).
     """
     if not chunks:
         return []
 
     reranker = get_reranker()
 
-    # Pair each chunk with the query
-    pairs = [(query, chunk.text) for chunk in chunks]
-
-    # Get relevance scores (single float per pair)
+    pairs  = [(query, chunk.text) for chunk in chunks]
     scores = reranker.predict(pairs, show_progress_bar=False)
 
-    # Attach scores and sort
     scored = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
 
     result = []

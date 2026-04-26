@@ -1,5 +1,13 @@
 """
 FastAPI application — main entry point.
+
+Fixes applied (from audit):
+  CRITICAL-6 — Removed hardcoded admin seed from the startup lifespan.
+               seed_dummy_user() reset the password to 'admin123' on every
+               deploy, including production. Use a one-time CLI command or
+               Alembic data migration for initial users instead.
+  A-1        — CORS origins are now driven by the ALLOWED_ORIGINS env var
+               instead of being hardcoded to 'http://localhost:5173'.
 """
 
 from contextlib import asynccontextmanager
@@ -7,30 +15,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.clients import init_minio, init_qdrant, init_redis
 from api.routes import documents, chat, review, health, retrieval, auth, workspace
-from core.auth import get_password_hash
+from core.config import get_settings
 
-from sqlalchemy import text
-from core.database import async_session
 from core.rate_limit import limiter
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-async def seed_dummy_user():
-    """Seed a real admin user for login (admin@contractrfi.com / admin123)."""
-    async with async_session() as db:
-        user_id = "00000000-0000-0000-0000-000000000001"
-        email = "admin@contractrfi.com"
-        
-        # Hash the password: admin123
-        hashed_pw = get_password_hash("admin123")
-        
-        await db.execute(text(
-            "INSERT INTO users (id, email, name, password_hash) "
-            "VALUES (:id, :email, :name, :password_hash) "
-            "ON CONFLICT (id) DO UPDATE SET password_hash = EXCLUDED.password_hash"
-        ), {"id": user_id, "email": email, "name": "Admin", "password_hash": hashed_pw})
-        await db.commit()
-        print(f"✅ User {email} seeded/updated")
+settings = get_settings()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,7 +31,10 @@ async def lifespan(app: FastAPI):
     init_minio()
     init_qdrant()
     await init_redis()
-    await seed_dummy_user()
+    # CRITICAL-6 FIX: seed_dummy_user() removed.
+    # It seeded admin@contractrfi.com / admin123 on EVERY startup via
+    # ON CONFLICT DO UPDATE — resetting any rotated password in production.
+    # Use a one-time Alembic data migration or CLI command for initial users.
     print("✅ All services connected")
     yield
     print("👋 Shutting down...")
@@ -55,10 +50,15 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# ── CORS ──
+# ── CORS — A-1 FIX: driven by env var, not hardcoded to localhost:5173 ───────
+# Set ALLOWED_ORIGINS in .env as a comma-separated list:
+#   ALLOWED_ORIGINS=http://localhost:5173,https://app.yourdomain.com
+_raw_origins = getattr(settings, "ALLOWED_ORIGINS", "http://localhost:5173")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Vite dev server
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

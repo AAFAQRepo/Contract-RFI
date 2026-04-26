@@ -126,11 +126,28 @@ export default function ChatPage() {
     }
 
     setInput('')
-    setPendingFiles([])
     setMessages(m => [...m, { id: Date.now(), role: 'user', text }])
     setSending(true)
 
     try {
+      // ── Pre-create conversation BEFORE streaming ──────────────────────────
+      // This gives us a UUID on the very first message, so the backend always
+      // has a conversation_id and NEVER does a global cross-chat search.
+      let convId = activeConversationId
+      if (!convId) {
+        const convRes = await api.post('/chat/conversations', {
+          document_ids: readyDocumentIds,
+          title: text.length > 50 ? text.slice(0, 50) + '…' : text,
+        })
+        convId = convRes.data.id
+        // Update URL and state immediately — feels instant to the user
+        setActiveConversationId(convId)
+        navigate(`/chat/${convId}`, { replace: true })
+        await fetchConversations()
+        // Clear pending files since they're now officially linked
+        setPendingFiles([])
+      }
+
       const token = await getValidToken()
       const response = await fetch(`${api.defaults.baseURL}/chat/message`, {
         method: 'POST',
@@ -141,7 +158,7 @@ export default function ChatPage() {
         body: JSON.stringify({
           query: text,
           document_ids: readyDocumentIds,
-          conversation_id: activeConversationId || null
+          conversation_id: convId,
         })
       })
 
@@ -165,8 +182,6 @@ export default function ChatPage() {
         for (const line of lines) {
           if (!line.trim()) continue
           
-          // Parse SSE format:
-          // event: thinking\ndata: {"v": "token"}
           const eventMatch = line.match(/^event: (.+)\ndata: (.+)$/m)
           if (!eventMatch) continue
 
@@ -184,7 +199,6 @@ export default function ChatPage() {
               } else if (event === 'thinking_end') {
                 return { ...msg, thinkingComplete: true }
               } else if (event === 'token') {
-                // If we get a token but thinking wasn't marked complete, do it now
                 return { ...msg, text: (msg.text || '') + (data.v || ''), thinkingComplete: true }
               } else if (event === 'done') {
                 return { ...msg, sources: data.sources || [], thinkingComplete: true }
@@ -194,16 +208,6 @@ export default function ChatPage() {
           } catch (e) {
             console.warn('Failed to parse SSE data', e)
           }
-        }
-      }
-
-      // After message complete, if it was a new chat, sync the URL
-      if (!activeConversationId) {
-        await fetchConversations()
-        const r = await api.get('/chat/conversations')
-        if (Array.isArray(r.data) && r.data.length > 0) {
-          const newId = r.data[0].id
-          navigate(`/chat/${newId}`, { replace: true })
         }
       }
 

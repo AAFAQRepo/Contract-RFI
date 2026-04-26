@@ -84,18 +84,40 @@ async def chat_message(
     """
     start_time = time.time()
 
-    # ── Step 1: Retrieve context ──────────────────────────────────────────────
-    # ISOLATION FIX: If document_ids is empty but conversation_id is provided,
-    # look up what documents belong to this conversation. NEVER fall through to
-    # a global search when a conversation is active — that causes cross-chat leakage.
-    search_doc_ids = payload.document_ids
-    if not search_doc_ids and payload.conversation_id:
-        from models.models import Document
-        doc_result = await db.execute(
-            select(Document.id).where(Document.conversation_id == payload.conversation_id)
-        )
-        search_doc_ids = [str(d) for d in doc_result.scalars().all()]
+    # ── Step 1: Resolve document IDs ────────────────────────────────────────────────
+    # Priority order:
+    #   a) Frontend sent explicit document_ids  → verify ownership, use them
+    #   b) conversation_id provided, no doc IDs → look them up from the DB
+    #   c) No conversation, no docs            → empty context (never global search)
+    #
+    # GLOBAL SEARCH IS NEVER TRIGGERED HERE. Cross-chat leakage is impossible.
+    from models.models import Document
 
+    search_doc_ids: List[str] = []
+
+    if payload.document_ids:
+        # Verify every supplied ID belongs to this user (IDOR guard)
+        verified = await db.execute(
+            select(Document.id)
+            .where(
+                Document.id.in_(payload.document_ids),
+                Document.user_id == current_user.id,
+            )
+        )
+        search_doc_ids = [str(r) for r in verified.scalars().all()]
+
+    elif payload.conversation_id:
+        # Resolve documents linked to this specific conversation
+        linked = await db.execute(
+            select(Document.id)
+            .where(
+                Document.conversation_id == payload.conversation_id,
+                Document.user_id == current_user.id,
+            )
+        )
+        search_doc_ids = [str(r) for r in linked.scalars().all()]
+
+    # Retrieve chunks only from verified document scope
     if search_doc_ids:
         chunks: List[RetrievedChunk] = await retriever.search_many(
             query=payload.query,
@@ -103,17 +125,9 @@ async def chat_message(
             document_ids=search_doc_ids,
             top_k=8,
         )
-    elif not payload.conversation_id:
-        # Only fall back to global search when there is NO active conversation.
-        # This handles the very first message before any document is uploaded.
-        chunks = await retriever.search(
-            query=payload.query,
-            user_id=str(current_user.id),
-            top_k=8,
-        )
     else:
-        # Conversation exists but has no linked documents yet — return empty context.
-        # The LLM will respond based on the system prompt alone (no cross-chat leakage).
+        # No documents in scope — return empty context.
+        # The LLM will answer from system prompt only; no cross-chat data ever.
         chunks = []
 
     # ── Step 1b: Fetch conversation history for multi-turn context ────────────
@@ -225,7 +239,53 @@ async def chat_message(
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+
 # ── Conversations ─────────────────────────────────────────────────────────────
+
+class NewConversationRequest(BaseModel):
+    document_ids: List[str] = []
+    title: Optional[str] = None
+
+
+@router.post("/conversations")
+async def create_conversation(
+    payload:      NewConversationRequest,
+    db:           AsyncSession = Depends(get_db),
+    current_user: User         = Depends(get_current_user),
+):
+    """
+    Pre-create a conversation and atomically link document_ids.
+
+    Call this BEFORE sending the first message so that every conversation
+    has a UUID from the very start, preventing the race condition where the
+    first message has no conversation_id and triggers a cross-chat search.
+    """
+    from models.models import Conversation, Document
+    from sqlalchemy import update as sa_update
+
+    conv = Conversation(
+        user_id=current_user.id,
+        title=payload.title or "New Chat",
+    )
+    db.add(conv)
+    await db.flush()   # get the generated UUID
+
+    # Atomically link documents to this conversation (ownership-verified)
+    if payload.document_ids:
+        await db.execute(
+            sa_update(Document)
+            .where(Document.id.in_(payload.document_ids))
+            .where(Document.user_id == current_user.id)
+            .values(conversation_id=conv.id)
+        )
+
+    await db.commit()
+    return {
+        "id":         str(conv.id),
+        "title":      conv.title,
+        "created_at": conv.created_at.isoformat() if conv.created_at else None,
+    }
+
 
 @router.get("/conversations")
 async def list_conversations(

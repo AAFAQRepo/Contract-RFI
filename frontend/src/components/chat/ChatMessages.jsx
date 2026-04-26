@@ -11,9 +11,6 @@ export function UserMessage({ id, text, onDelete }) {
     <div className="msg-user">
       <div className="msg-user-bubble">
         {text}
-        <button className="msg-bubble-delete" onClick={() => onDelete(realId)} title="Delete message">
-          <Icon.Trash />
-        </button>
       </div>
     </div>
   )
@@ -40,7 +37,6 @@ export function AIMessage({ id, text, thinking, sources, onDelete }) {
         <button className="msg-action-btn" title="Helpful"><Icon.ThumbUp /></button>
         <button className="msg-action-btn" title="Not helpful"><Icon.ThumbDown /></button>
         <button className="msg-action-btn" title="Copy" onClick={() => navigator.clipboard.writeText(text)}><Icon.Copy /></button>
-        <button className="msg-action-btn" title="Delete" onClick={() => onDelete(realId)}><Icon.Trash /></button>
       </div>
     </div>
   )

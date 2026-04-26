@@ -327,9 +327,6 @@ export default function ChatPage() {
           </div>
           <div className="topbar-right">
             <button className="topbar-btn" id="share-btn"><Icon.Share /> Share</button>
-            <button className="topbar-icon-btn" id="toggle-files-btn" onClick={() => setShowFiles(v => !v)}>
-              <Icon.Columns />
-            </button>
           </div>
         </div>
         )}
@@ -367,8 +364,8 @@ export default function ChatPage() {
               )}
               {messages.map(msg =>
                 msg.role === 'user'
-                  ? <UserMessage key={msg.id} id={msg.id} text={msg.text} onDelete={handleDeleteMessage} />
-                  : <AIMessage key={msg.id} id={msg.id} text={msg.text} thinking={msg.thinking} sources={msg.sources} onDelete={handleDeleteMessage} />
+                  ? <UserMessage key={msg.id} id={msg.id} text={msg.text} />
+                  : <AIMessage key={msg.id} id={msg.id} text={msg.text} thinking={msg.thinking} sources={msg.sources} />
               )}
               {sending && (
                 <div className="msg-ai">
@@ -388,7 +385,6 @@ export default function ChatPage() {
         {/* Input — always shown when chat is active */}
         {hasActiveChat && (
           <div className="chat-input-wrapper">
-            <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} variant="legal-assistant" />
             <ChatInput
               input={input} setInput={setInput} onSend={() => sendMessage()}
               onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}

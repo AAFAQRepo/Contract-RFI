@@ -74,9 +74,9 @@ export default function ChatInput({
   input, setInput, onSend, onUploadClick,
   pendingFiles = [], onRemoveFile, sending,
   disabled = false,
-  placeholder = "Ask Spellbook to edit, review, or summarize legal documents",
+  placeholder = "Ask Legal Assistant to edit, review, or summarize legal documents",
   idPrefix = "chat",
-  variant = "classic" // or "spellbook"
+  variant = "classic" // or "legal-assistant"
 }) {
   const textareaRef = useRef(null)
   const effectivePlaceholder = disabled ? "Waiting for documents to process..." : placeholder
@@ -92,9 +92,9 @@ export default function ChatInput({
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!disabled) onSend() }
   }
 
-  if (variant === 'spellbook') {
+  if (variant === 'legal-assistant') {
     return (
-      <div className={`chat-input-box spellbook-style ${disabled ? 'disabled' : ''}`}>
+      <div className={`chat-input-box legal-assistant-style ${disabled ? 'disabled' : ''}`}>
         {pendingFiles.length > 0 && (
           <div className="file-chips-container" style={{ paddingBottom: 12 }}>
             {pendingFiles.map(f => (
@@ -104,7 +104,7 @@ export default function ChatInput({
         )}
         <textarea 
           ref={textareaRef} 
-          className="spellbook-textarea" 
+          className="legal-assistant-textarea" 
           placeholder={effectivePlaceholder}
           value={input} 
           onChange={handleInputChange} 
@@ -113,19 +113,19 @@ export default function ChatInput({
           disabled={disabled} 
           id={`${idPrefix}-input`} 
         />
-        <div className="spellbook-actions">
-          <button className="spellbook-btn" onClick={onUploadClick} disabled={sending}>
+        <div className="legal-assistant-actions">
+          <button className="legal-assistant-btn" onClick={onUploadClick} disabled={sending}>
             <Icon.Attach /> Add files
           </button>
-          <button className="spellbook-btn" disabled={disabled}>
+          <button className="legal-assistant-btn" disabled={disabled}>
             <Icon.Library /> Library
           </button>
           <div style={{ flex: 1 }} />
-          <button className="spellbook-btn prompts" disabled={disabled}>
+          <button className="legal-assistant-btn prompts" disabled={disabled}>
             <Icon.Message /> Prompts
           </button>
           <button
-            className={`spellbook-send ${(input.trim() || pendingFiles.length > 0) && !sending && !disabled ? 'active' : ''}`}
+            className={`legal-assistant-send ${(input.trim() || pendingFiles.length > 0) && !sending && !disabled ? 'active' : ''}`}
             onClick={onSend}
             disabled={(!input.trim() && pendingFiles.length === 0) || sending || disabled}
             id={`${idPrefix}-send-btn`}

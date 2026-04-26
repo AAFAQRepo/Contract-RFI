@@ -9,17 +9,17 @@ const PROMPT_TEMPLATES = [
 ]
 
 export default function PromptTemplates({ onSelect, disabled, variant = 'classic' }) {
-  if (variant === 'spellbook') {
+  if (variant === 'legal-assistant') {
     return (
-      <div className="spellbook-chips">
+      <div className="legal-assistant-chips">
         {PROMPT_TEMPLATES.map(t => (
           <button
             key={t.id}
-            className={`spellbook-chip ${t.color}`}
+            className={`legal-assistant-chip ${t.color}`}
             onClick={() => onSelect(t.prompt)}
             disabled={disabled}
           >
-            <span className="spellbook-chip-icon">{t.icon}</span>
+            <span className="legal-assistant-chip-icon">{t.icon}</span>
             {t.label}
           </button>
         ))}

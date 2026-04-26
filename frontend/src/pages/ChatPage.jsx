@@ -346,11 +346,11 @@ export default function ChatPage() {
                   onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
                   onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
                   sending={sending} disabled={isProcessing} idPrefix="home"
-                  variant="spellbook"
+                  variant="legal-assistant"
                 />
               </div>
 
-              <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} variant="spellbook" />
+              <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} variant="legal-assistant" />
 
               <div className="home-secondary-actions">
                 <div className="secondary-action-link"><Icon.Workflows /> Explore workflows</div>
@@ -388,13 +388,14 @@ export default function ChatPage() {
         {/* Input — always shown when chat is active */}
         {hasActiveChat && (
           <div className="chat-input-wrapper">
-            <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} />
+            <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} variant="legal-assistant" />
             <ChatInput
               input={input} setInput={setInput} onSend={() => sendMessage()}
               onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
               onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
               sending={sending} disabled={isProcessing}
               idPrefix="chat"
+              variant="legal-assistant"
             />
           </div>
         )}

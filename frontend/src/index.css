@@ -66,11 +66,11 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 0.9rem;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
   font-weight: 500;
-  color: #555555;
+  color: #000000;
   text-decoration: none;
   cursor: pointer;
   transition: all 0.2s;
@@ -79,9 +79,9 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   width: 100%;
   text-align: left;
 }
-.sidebar-nav-item:hover { background: #f0f0f0; color: #111111; }
-.sidebar-nav-item.active { background: #eeeeee; color: #111111; font-weight: 600; }
-.sidebar-nav-item svg { opacity: 1; flex-shrink: 0; color: #1a1a1a; }
+.sidebar-nav-item:hover { background: #f0f0f0; color: #000000; }
+.sidebar-nav-item.active { background: #eeeeee; color: #000000; font-weight: 600; }
+.sidebar-nav-item svg { opacity: 1; flex-shrink: 0; color: #000000; }
 .sidebar-nav-item.active svg { opacity: 1; color: #000000; }
 .sidebar-nav-item span { white-space: nowrap; overflow: hidden; }
 
@@ -730,8 +730,8 @@ body:has(.landing-container)::-webkit-scrollbar-track {
 
 /* ── Collapsed Sidebar ── */
 .sidebar-collapsed {
-  width: 52px;
-  min-width: 52px;
+  width: 48px;
+  min-width: 48px;
 }
 
 /* Sidebar menu/hamburger toggle button */
@@ -744,18 +744,18 @@ body:has(.landing-container)::-webkit-scrollbar-track {
 .sidebar-menu-btn svg { color: #1a1a1a !important; opacity: 1 !important; }
 .sidebar-menu-btn:hover { background: #f0f0f0 !important; }
 .sidebar-icon-only {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0;
   font-size: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
-.sidebar-icon-only svg { opacity: 0.8; color: #111111; }
+.sidebar-icon-only svg { opacity: 1; color: #000000; }
 .sidebar-icon-only:hover { background: #f0f0f0; }
 .sidebar-icon-only:hover svg { opacity: 1; color: #000000; }
 

@@ -30,6 +30,11 @@ export default function ThinkingBlock({ thinking, isComplete }) {
     if (isComplete && timerRef.current) {
       clearInterval(timerRef.current)
       timerRef.current = null
+      
+      // Auto-collapse after a short delay when complete
+      setTimeout(() => {
+        setOpen(false)
+      }, 1000)
     }
 
     return () => {

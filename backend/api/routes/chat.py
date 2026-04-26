@@ -164,10 +164,29 @@ async def chat_message(
 
             # Detect thinking/answer boundary and emit typed events (U-1 FIX)
             if "<thinking>" in token:
+                parts = token.split("<thinking>", 1)
+                # Send anything before the tag as a normal token
+                if parts[0]:
+                    yield _sse("token", {"v": parts[0]})
+                
                 in_thinking = True
+                # Send anything after the tag as thinking
+                if parts[1]:
+                    yield _sse("thinking", {"v": parts[1]})
+                continue
+
             if "</thinking>" in token:
+                parts = token.split("</thinking>", 1)
+                # Send the thinking portion before the tag
+                if parts[0]:
+                    yield _sse("thinking", {"v": parts[0]})
+                
                 in_thinking = False
                 yield _sse("thinking_end", {})
+                
+                # Send the answer portion after the tag as a normal token
+                if parts[1]:
+                    yield _sse("token", {"v": parts[1]})
                 continue
 
             event_type = "thinking" if in_thinking else "token"
@@ -223,6 +242,7 @@ async def chat_message(
             conversation_id=conv_id,
             document_id=payload.document_ids[0] if payload.document_ids else None,
             query=payload.query,
+            thinking=final_thinking,
             answer=final_answer,
             sources=[
                 {"document_id": c.document_id, "page": c.page, "text": c.text[:400]}
@@ -346,17 +366,31 @@ async def chat_history(
     result = await db.execute(query.order_by(Chat.created_at.asc()))
     chats  = result.scalars().all()
 
-    return [
-        ChatResponse(
+    # Map to response objects
+    responses = []
+    for c in chats:
+        final_answer = c.answer
+        final_thinking = c.thinking or ""
+        
+        # Legacy/On-the-fly extraction: if thinking is empty but answer contains tags
+        if not final_thinking and "<thinking>" in final_answer and "</thinking>" in final_answer:
+            try:
+                parts = final_answer.split("</thinking>", 1)
+                final_thinking = parts[0].replace("<thinking>", "").strip()
+                final_answer = parts[1].strip()
+            except Exception:
+                pass
+                
+        responses.append(ChatResponse(
             id=str(c.id),
             query=c.query or "",
-            answer=c.answer,
-            thinking="",
+            answer=final_answer,
+            thinking=final_thinking,
             sources=[SourceChunk(**s) for s in (c.sources or [])],
             created_at=c.created_at.isoformat(),
-        )
-        for c in chats
-    ]
+        ))
+
+    return responses
 
 
 @router.get("/sessions")

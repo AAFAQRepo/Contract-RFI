@@ -161,6 +161,7 @@ class Chat(Base):
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True)
     query = Column(Text, nullable=False)
+    thinking = Column(Text, nullable=True)
     answer = Column(Text, nullable=False)
     sources = Column(JSONB, default=list)               # [{chunk_id, section, page, text_snippet}]
     intent = Column(String, nullable=True)              # simple_qa, summary, risk

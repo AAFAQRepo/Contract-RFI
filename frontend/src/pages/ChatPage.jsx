@@ -327,11 +327,9 @@ export default function ChatPage() {
           </div>
           <div className="topbar-right">
             <button className="topbar-btn" id="share-btn"><Icon.Share /> Share</button>
-            {!showFiles && (
-              <button className="topbar-icon-btn" id="toggle-files-btn" onClick={() => setShowFiles(v => !v)}>
-                <Icon.Columns />
-              </button>
-            )}
+            <button className="topbar-icon-btn" id="toggle-files-btn" onClick={() => setShowFiles(v => !v)}>
+              <Icon.Columns />
+            </button>
           </div>
         </div>
         )}

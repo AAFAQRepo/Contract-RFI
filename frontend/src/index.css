@@ -66,11 +66,11 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: 8px;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 500;
-  color: #555555;
+  color: #333333;
   text-decoration: none;
   cursor: pointer;
   transition: all 0.2s;
@@ -79,19 +79,19 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   width: 100%;
   text-align: left;
 }
-.sidebar-nav-item:hover { background: #f0f0f0; color: #111111; }
-.sidebar-nav-item.active { background: #eeeeee; color: #111111; font-weight: 600; }
-.sidebar-nav-item svg { opacity: 1; flex-shrink: 0; color: #1a1a1a; }
+.sidebar-nav-item:hover { background: #f2f2f2; color: #000000; }
+.sidebar-nav-item.active { background: #f2f2f2; color: #000000; font-weight: 500; }
+.sidebar-nav-item svg { opacity: 1; flex-shrink: 0; color: #333333; }
 .sidebar-nav-item.active svg { opacity: 1; color: #000000; }
 .sidebar-nav-item span { white-space: nowrap; overflow: hidden; }
 
 .sidebar-section-label {
-  padding: 10px 18px 4px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  padding: 14px 18px 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #888888;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .sidebar-project-item {
@@ -133,20 +133,23 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
 .sidebar-account-btn {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  color: var(--text-secondary);
+  gap: 12px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: #333333;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: all 0.2s;
   border: none;
   background: none;
   width: 100%;
   text-align: left;
   position: relative;
 }
-.sidebar-account-btn:hover { background: var(--bg-hover); color: var(--text); }
+.sidebar-account-btn:hover { background: #f2f2f2; color: #000000; }
+.sidebar-account-btn svg { color: #333333; }
+.sidebar-account-btn:hover svg { color: #000000; }
 
 .account-avatar {
   width: 28px;
@@ -734,15 +737,55 @@ body:has(.landing-container)::-webkit-scrollbar-track {
   min-width: 52px;
 }
 
-/* Sidebar menu/hamburger toggle button */
-.sidebar-menu-btn {
-  flex-shrink: 0;
-  color: #1a1a1a !important;
-  background: none !important;
-  border: none !important;
+/* Sidebar logo/toggle container */
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 12px;
+  position: relative;
+  min-height: 56px;
 }
-.sidebar-menu-btn svg { color: #1a1a1a !important; opacity: 1 !important; }
-.sidebar-menu-btn:hover { background: #f0f0f0 !important; }
+.sidebar-toggle-wrapper {
+  position: relative;
+  width: 32px;
+  height: 32px;
+}
+.sidebar-menu-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+.sidebar-menu-btn svg { color: #333333 !important; }
+.sidebar-menu-btn:hover { background: #f2f2f2 !important; }
+
+.sidebar-collapsed .sidebar-menu-btn {
+  opacity: 0;
+  pointer-events: none;
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.sidebar-collapsed .sidebar-logo:hover .sidebar-menu-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.sidebar-collapsed .sidebar-logo:hover .logo-icon-wrap {
+  opacity: 0;
+}
+.logo-icon-wrap {
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+}
 .sidebar-icon-only {
   width: 36px;
   height: 36px;
@@ -1465,21 +1508,12 @@ body:has(.auth-single-container)::-webkit-scrollbar {
   flex-shrink: 0;
   margin-top: 2px;
 }
-.circle-avatar {
-  background: #10a37f !important;
-  color: white !important;
-  border-radius: 50% !important;
-  width: 24px !important;
-  height: 24px !important;
-  margin-right: 0;
+.sidebar-skeleton-item {
+  height: 32px;
+  margin: 8px 12px;
+  border-radius: 6px;
 }
-.sidebar-account-btn .circle-avatar {
-  width: 28px !important;
-  height: 28px !important;
-}
-.sidebar-collapsed .circle-avatar {
-  margin-right: 0;
-}
+
 
 .classic-quote {
   margin-top: 48px;

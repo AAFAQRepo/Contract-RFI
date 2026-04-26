@@ -24,9 +24,9 @@ from services.embedding import embed_query
 
 DENSE_TOP_K = 30       # Number of candidates from dense search
 SPARSE_TOP_K = 30      # Number of candidates from sparse (BM25) search
-RRF_K = 60             # Standard RRF constant (controls score smoothing)
+RRF_K = 60             # Standard RRF constant
 RERANK_TOP_K = 50      # Chunks passed to the reranker
-FINAL_TOP_K = 20        # Final returned chunks after reranking
+FINAL_TOP_K = 40        # Default maximum chunks (increased for flexibility)
 
 
 # ── Data Structures ──────────────────────────────────────────────────────────
@@ -201,6 +201,7 @@ class HybridRetriever:
         document_id: Optional[str] = None,
         top_k: int = FINAL_TOP_K,
         rerank: bool = True,
+        rerank_threshold: Optional[float] = -4.0,
     ) -> list[RetrievedChunk]:
 
         print(f"🔍 Dense search for: {query[:80]}...")
@@ -227,8 +228,10 @@ class HybridRetriever:
         # Reranking
         if rerank and candidates:
             from services.reranker import rerank_chunks
-            candidates = rerank_chunks(query, candidates, top_k=top_k)
+            candidates = rerank_chunks(query, candidates, top_k=top_k, threshold=rerank_threshold)
             print(f"⚡ Reranked → top {len(candidates)}")
+            if candidates:
+                print(f"   └─ Top rerank score: {candidates[0].score:.4f}")
         else:
             candidates = candidates[:top_k]
 

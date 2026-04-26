@@ -1631,12 +1631,6 @@ body:has(.auth-single-container)::-webkit-scrollbar {
   letter-spacing: -0.01em;
 }
 
-.home-input-box {
-  width: 100%;
-  max-width: 800px; /* Increased from 680px */
-  margin-bottom: 24px;
-}
-
 /* Chat Input Redesign */
 .chat-input-box.spellbook-style {
   background: #fff;

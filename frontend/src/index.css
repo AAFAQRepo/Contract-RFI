@@ -34,35 +34,34 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
 /* ── Left Sidebar ── */
 .sidebar {
   width: var(--sidebar-w);
-  background: #fcfcfc;
-  border-right: 1px solid rgba(0,0,0,0.06);
+  background: #ffffff;
+  border-right: 1px solid #eeeeee;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   z-index: 100;
-  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), background 0.4s;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
   will-change: width;
-  box-shadow: 2px 0 8px rgba(0,0,0,0.02);
 }
 
 .sidebar-logo {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px;
-  height: 60px;
-  flex-shrink: 0;
+  gap: 8px;
+  padding: 16px 16px 8px;
 }
 
-.sidebar-logo-text {
-  font-size: 0.95rem;
-  font-weight: 700;
+.sidebar-logo svg { flex-shrink: 0; }
+.sidebar-logo-text { 
+  font-size: 0.85rem; 
+  font-weight: 700; 
   color: var(--text);
   white-space: nowrap;
-  transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s;
+  overflow: hidden;
+  transition: opacity 0.2s ease, width 0.2s ease, margin 0.2s ease;
+  width: auto;
   opacity: 1;
-  transform: translateX(0);
 }
 
 .sidebar-nav {
@@ -78,9 +77,9 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   gap: 12px;
   padding: 8px 10px;
   border-radius: 6px;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 500;
-  color: #444;
+  color: #000000;
   text-decoration: none;
   cursor: pointer;
   transition: all 0.2s;
@@ -91,44 +90,38 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
 }
 .sidebar-nav-item:hover { background: #f0f0f0; color: #000000; }
 .sidebar-nav-item.active { background: #eeeeee; color: #000000; font-weight: 600; }
-.sidebar-nav-item svg { width: 20px; height: 20px; opacity: 1; flex-shrink: 0; color: #000000; transition: margin 0.3s; }
+.sidebar-nav-item svg { opacity: 1; flex-shrink: 0; color: #000000; }
 .sidebar-nav-item.active svg { opacity: 1; color: #000000; }
-.sidebar-text {
-  white-space: nowrap;
+.sidebar-nav-item span { 
+  white-space: nowrap; 
   overflow: hidden;
-  transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s;
+  transition: opacity 0.2s ease, width 0.2s ease;
   opacity: 1;
-  transform: translateX(0);
-}
-
-.sidebar-scroll-area {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 8px 0;
 }
 
 .sidebar-section-label {
-  padding: 16px 18px 8px;
-  font-size: 0.7rem;
+  padding: 10px 18px 4px;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  transition: opacity 0.2s;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 0.2s ease;
 }
 
 .sidebar-project-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
-  margin: 2px 8px;
+  padding: 7px 10px;
+  margin: 0 8px;
   border-radius: 6px;
-  font-size: 0.85rem;
+  font-size: 0.83rem;
   color: var(--text);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.15s;
   text-decoration: none;
 }
 .sidebar-project-item:hover { background: var(--bg-hover); }
@@ -138,7 +131,7 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   overflow: hidden; 
   text-overflow: ellipsis; 
   flex: 1;
-  transition: opacity 0.3s;
+  transition: opacity 0.2s ease;
 }
 .sidebar-project-more {
   opacity: 0;
@@ -149,39 +142,39 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   cursor: pointer;
   color: var(--text-secondary);
   font-size: 0.9rem;
-  transition: opacity 0.2s;
 }
 .sidebar-project-item:hover .sidebar-project-more { opacity: 1; }
 
 .sidebar-bottom {
+  margin-top: auto;
   padding: 8px;
   border-top: 1px solid #eeeeee;
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
 .sidebar-account-btn {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 8px 10px;
   border-radius: 6px;
   font-size: 0.875rem;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.15s;
   border: none;
   background: none;
   width: 100%;
   text-align: left;
+  position: relative;
 }
 .sidebar-account-btn:hover { background: var(--bg-hover); color: var(--text); }
-
-.account-name {
-  text-overflow: ellipsis;
+.sidebar-account-name {
   overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  transition: opacity 0.2s ease;
 }
 
 .account-avatar {
@@ -766,53 +759,36 @@ body:has(.landing-container)::-webkit-scrollbar-track {
 
 /* ── Collapsed Sidebar ── */
 .sidebar-collapsed {
-  width: 64px;
-  min-width: 64px;
-  background: #ffffff;
+  width: 60px; /* Slightly wider for better icon centering */
+  min-width: 60px;
 }
 
 .sidebar-collapsed .sidebar-logo-text,
-.sidebar-collapsed .sidebar-text,
+.sidebar-collapsed .sidebar-nav-item span,
 .sidebar-collapsed .sidebar-section-label,
 .sidebar-collapsed .sidebar-project-name,
-.sidebar-collapsed .sidebar-project-more {
+.sidebar-collapsed .sidebar-project-more,
+.sidebar-collapsed .sidebar-account-name {
   opacity: 0;
-  transform: translateX(-15px);
-  visibility: hidden;
   pointer-events: none;
-}
-
-.sidebar-collapsed .sidebar-logo {
-  padding: 16px 0;
-  justify-content: center;
-  gap: 0;
-}
-
-.sidebar-collapsed .sidebar-nav-item,
-.sidebar-collapsed .sidebar-account-btn {
-  justify-content: center;
-  padding: 10px 0;
-  width: 100%;
-}
-
-.sidebar-collapsed .sidebar-nav-item svg,
-.sidebar-collapsed .sidebar-account-btn .account-avatar {
+  width: 0;
+  padding: 0;
   margin: 0;
-  transform: scale(1.1);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden; /* Prevent text overflow during shrink */
 }
 
-.sidebar-collapsed .sidebar-nav {
+.sidebar-collapsed .sidebar-content-area {
+  overflow: hidden !important;
+}
+
+.sidebar-collapsed .sidebar-nav-item {
+  justify-content: center;
   padding: 8px 0;
 }
 
-.sidebar-collapsed .sidebar-project-item {
-  padding: 10px 0;
+.sidebar-collapsed .sidebar-logo {
   justify-content: center;
-}
-
-.sidebar-collapsed .sidebar-scroll-area {
-  opacity: 0.5; /* Show icons if they were there, but currently we hide project text */
+  padding: 16px 0 8px;
 }
 
 /* Sidebar menu/hamburger toggle button */
@@ -821,16 +797,9 @@ body:has(.landing-container)::-webkit-scrollbar-track {
   color: #1a1a1a !important;
   background: none !important;
   border: none !important;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.2s;
 }
-.sidebar-menu-btn:hover { background: rgba(0,0,0,0.05) !important; }
+.sidebar-menu-btn svg { color: #1a1a1a !important; opacity: 1 !important; }
+.sidebar-menu-btn:hover { background: #f0f0f0 !important; }
 .sidebar-icon-only {
   width: 32px;
   height: 32px;

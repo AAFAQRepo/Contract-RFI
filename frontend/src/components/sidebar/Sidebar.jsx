@@ -42,11 +42,11 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
     <nav className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}>
       {/* ── Top: Logo + Toggle ── */}
       <div className="sidebar-logo">
-        <div className="logo-icon-wrap">
+        <div className="logo-icon-wrap" style={{ margin: collapsed ? '0 auto' : '0' }}>
           <Logo />
         </div>
         
-        <div className="sidebar-toggle-wrapper">
+        <div className="sidebar-toggle-wrapper" style={{ display: collapsed ? 'contents' : 'block' }}>
           <button
             className="sidebar-menu-btn"
             onClick={() => setCollapsed(v => !v)}

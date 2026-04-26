@@ -327,11 +327,9 @@ export default function ChatPage() {
           </div>
           <div className="topbar-right">
             <button className="topbar-btn" id="share-btn"><Icon.Share /> Share</button>
-            {!showFiles && (
-              <button className="topbar-icon-btn" id="toggle-files-btn" onClick={() => setShowFiles(true)}>
-                <Icon.Columns />
-              </button>
-            )}
+            <button className="topbar-icon-btn" id="toggle-files-btn" onClick={() => setShowFiles(v => !v)}>
+              <Icon.Columns />
+            </button>
           </div>
         </div>
         )}
@@ -341,6 +339,18 @@ export default function ChatPage() {
           {!hasActiveChat ? (
             <div className="home-screen">
               <h1 className="home-greeting">{getGreeting()} {user?.name?.split(' ')[0] || 'there'}, let's get to work</h1>
+
+              <div className="home-input-box">
+                <ChatInput
+                  input={input} setInput={setInput} onSend={() => sendMessage()}
+                  onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
+                  onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
+                  sending={sending} disabled={isProcessing} idPrefix="home"
+                  variant="spellbook"
+                />
+              </div>
+
+              <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} variant="spellbook" />
 
               <div className="home-secondary-actions">
                 <div className="secondary-action-link"><Icon.Workflows /> Explore workflows</div>
@@ -375,18 +385,19 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Input — always shown at the bottom */}
-        <div className="chat-input-wrapper">
-          {!hasActiveChat && <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} variant="spellbook" />}
-          {hasActiveChat && <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} />}
-          <ChatInput
-            input={input} setInput={setInput} onSend={() => sendMessage()}
-            onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
-            onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
-            sending={sending} disabled={isProcessing}
-            idPrefix="chat"
-          />
-        </div>
+        {/* Input — always shown when chat is active */}
+        {hasActiveChat && (
+          <div className="chat-input-wrapper">
+            <PromptTemplates onSelect={sendMessage} disabled={isProcessing || sending} />
+            <ChatInput
+              input={input} setInput={setInput} onSend={() => sendMessage()}
+              onUploadClick={triggerFileUpload} pendingFiles={pendingFiles}
+              onRemoveFile={f => setPendingFiles(p => p.filter(x => x.id !== f.id))}
+              sending={sending} disabled={isProcessing}
+              idPrefix="chat"
+            />
+          </div>
+        )}
 
         <div className="bottom-privacy">
           <Icon.Lock /> Your data is secure and private in Contract RFI

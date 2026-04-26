@@ -35,6 +35,7 @@ export default function ChatPage() {
   const [uploading, setUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [showFiles, setShowFiles] = useState(false)
+  const [topbarVisible, setTopbarVisible] = useState(false)
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
 
@@ -66,7 +67,14 @@ export default function ChatPage() {
     setMessages([])
     setPendingFiles([])
 
-    if (!activeConversationId) return
+    if (!activeConversationId) {
+      setTopbarVisible(false)
+      setShowFiles(false)
+      return
+    }
+    // Entering an existing conversation: show topbar immediately
+    setTopbarVisible(true)
+    setShowFiles(true)
     if (!localStorage.getItem('forceHistory')) return
 
     api.get(`/chat/history?conversation_id=${activeConversationId}`)
@@ -96,6 +104,13 @@ export default function ChatPage() {
   const sendMessage = async (overrideInput) => {
     const text = (overrideInput || input).trim()
     if (!text || sending) return
+
+    // Optimistically reveal the topbar + files panel on the very first message
+    const isFirstMessage = !activeConversationId && messages.length === 0
+    if (isFirstMessage) {
+      setTopbarVisible(true)
+      setShowFiles(true)
+    }
 
     setInput('')
     setPendingFiles([])
@@ -299,8 +314,9 @@ export default function ChatPage() {
         onChange={e => { const f = e.target.files[0]; if (f) handleUpload(f); e.target.value = '' }} />
 
       <div className="main-area">
-        {/* Topbar */}
-        <div className="topbar">
+        {/* Topbar — only visible once chat has started */}
+        {topbarVisible && (
+        <div className={`topbar topbar-slide-in`}>
           <div className="topbar-left">
             <span className="topbar-title">
               {activeConversationId
@@ -316,6 +332,7 @@ export default function ChatPage() {
             </button>
           </div>
         </div>
+        )}
 
         {/* Chat Area */}
         <div className="chat-area">

@@ -49,18 +49,18 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
         >
           <Logo />
         </div>
-        <div className="sidebar-nav" style={{ alignItems: 'center' }}>
+        <div className="sidebar-nav" style={{ alignItems: 'center', gap: '20px', padding: '24px 0' }}>
           <button className="sidebar-nav-item sidebar-icon-only" onClick={handleNewChat} title="New Chat"><Icon.Plus /></button>
           <button className="sidebar-nav-item sidebar-icon-only" onClick={() => { setCollapsed(false); setShowSearch(true) }} title="Search"><Icon.Search /></button>
           <button className="sidebar-nav-item sidebar-icon-only" title="Library"><Icon.Library /></button>
           <button className="sidebar-nav-item sidebar-icon-only" title="Workflows"><Icon.Workflows /></button>
         </div>
         <div style={{ flex: 1 }} />
-        <div className="sidebar-bottom" style={{ alignItems: 'center' }}>
+        <div className="sidebar-bottom" style={{ alignItems: 'center', gap: '20px', paddingBottom: '24px' }}>
           <button className="sidebar-nav-item sidebar-icon-only" title="Help"><Icon.Help /></button>
           <div style={{ position: 'relative' }}>
             <button className="sidebar-account-btn sidebar-icon-only" onClick={() => setShowAccount(v => !v)} style={{ justifyContent: 'center' }}>
-              <div className="account-avatar">{initial}</div>
+              <Icon.User />
             </button>
             {showAccount && (
               <>

@@ -21,7 +21,9 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
   const initial = user?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || 'U'
 
   const handleNewChat = () => {
-    resetForNewChat()
+    // We only navigate; the ChatPage's useEffect will see the missing ID 
+    // and call resetForNewChat() to sync the state. This prevents a race 
+    // condition where state is null but URL still has the old ID.
     navigate('/chat')
   }
 
@@ -31,8 +33,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
       await api.delete(`/chat/conversations/${convId}`)
       setConversations(c => c.filter(x => x.id !== convId))
       if (activeConversationId === convId) {
-        setActiveConversationId(null)
-        navigate('/')
+        navigate('/chat')
       }
     } catch {
       alert('Delete failed')
@@ -119,7 +120,6 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
                   className={`sidebar-project-item ${activeConversationId === conv.id ? 'active' : ''}`}
                   onClick={() => {
                     localStorage.setItem('forceHistory', 'true')
-                    setActiveConversationId(conv.id)
                     navigate(`/chat/${conv.id}`)
                   }}
                   title={conv.title}

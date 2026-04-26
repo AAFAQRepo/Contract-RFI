@@ -10,13 +10,16 @@ export function ProjectProvider({ children }) {
   const [activeConversationId, setActiveConversationId] = useState(null)
   // conversationDocs: docs scoped to the currently active conversation
   const [conversationDocs, setConversationDocs] = useState([])
+  const [loadingConversations, setLoadingConversations] = useState(false)
 
   const fetchConversations = useCallback(async () => {
     if (!isAuthenticated) return
+    setLoadingConversations(true)
     try {
       const r = await api.get('/chat/conversations')
       if (Array.isArray(r.data)) setConversations(r.data)
     } catch { /* silent */ }
+    setLoadingConversations(false)
   }, [isAuthenticated])
 
   // Fetch documents scoped to a specific conversation
@@ -71,6 +74,7 @@ export function ProjectProvider({ children }) {
       conversationDocs, setConversationDocs, fetchConversationDocs,
       // Helpers
       resetForNewChat,
+      loadingConversations,
       // Legacy aliases so nothing else breaks
       resetForNewProject: resetForNewChat,
     }}>

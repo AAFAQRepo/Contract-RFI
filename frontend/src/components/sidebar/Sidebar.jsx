@@ -15,6 +15,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
     conversations, setConversations,
     activeConversationId, setActiveConversationId,
     resetForNewChat,
+    loadingConversations,
   } = useProjects()
 
   const initial = user?.email?.charAt(0).toUpperCase() || 'U'
@@ -59,8 +60,8 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
         <div className="sidebar-bottom" style={{ alignItems: 'center', gap: '8px', paddingBottom: '16px' }}>
           <button className="sidebar-nav-item sidebar-icon-only" title="Help"><Icon.Help /></button>
           <div style={{ position: 'relative' }}>
-            <button className="sidebar-account-btn sidebar-icon-only" onClick={() => setShowAccount(v => !v)} style={{ justifyContent: 'center' }}>
-              <Icon.User />
+            <button className="sidebar-account-btn sidebar-icon-only" onClick={() => setShowAccount(v => !v)} style={{ justifyContent: 'center', border: 'none', background: 'none' }}>
+              <div className="account-avatar circle-avatar" style={{ margin: 0 }}>{initial}</div>
             </button>
             {showAccount && (
               <>
@@ -105,11 +106,17 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
         </button>
       </div>
 
-      {/* Conversations list — the ONLY thing shown in the sidebar */}
-      {conversations.length > 0 && (
-        <>
-          <div className="sidebar-section-label">Conversations</div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 8px' }}>
+      {/* Conversations list — with skeleton loading */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 8px' }}>
+        {loadingConversations ? (
+          <>
+            <div className="sidebar-skeleton-item skeleton" />
+            <div className="sidebar-skeleton-item skeleton" style={{ width: '70%' }} />
+            <div className="sidebar-skeleton-item skeleton" style={{ width: '85%' }} />
+          </>
+        ) : conversations.length > 0 ? (
+          <>
+            <div className="sidebar-section-label">Conversations</div>
             {conversations.map(conv => (
               <div
                 key={conv.id}
@@ -128,10 +135,9 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
                 ><Icon.More /></button>
               </div>
             ))}
-          </div>
-        </>
-      )}
-      {conversations.length === 0 && <div style={{ flex: 1 }} />}
+          </>
+        ) : null}
+      </div>
 
       {ctxMenu && (
         <>
@@ -146,7 +152,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
         <button className="sidebar-nav-item"><Icon.Help /> Help</button>
         <div style={{ position: 'relative' }}>
           <button className="sidebar-account-btn" id="account-btn" onClick={() => setShowAccount(v => !v)}>
-            <div className="account-avatar">{initial}</div>
+            <div className="account-avatar circle-avatar">{initial}</div>
             {user?.name || 'Account'}
           </button>
           {showAccount && (

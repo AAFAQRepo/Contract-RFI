@@ -41,6 +41,7 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   flex-direction: column;
   overflow: visible;
   z-index: 100;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar-logo {
@@ -146,13 +147,16 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
 .sidebar-account-btn:hover { background: var(--bg-hover); color: var(--text); }
 
 .account-avatar {
-  width: 28px; height: 28px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: #00897b;
+  background: #10a37f;
   color: #fff;
-  font-size: 0.8rem;
-  font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
@@ -739,9 +743,9 @@ body:has(.landing-container)::-webkit-scrollbar-track {
   border-radius: 8px;
   transition: all 0.2s;
 }
-.sidebar-icon-only svg { opacity: 0.5; color: #666666; }
-.sidebar-icon-only:hover { background: #f5f5f5; }
-.sidebar-icon-only:hover svg { opacity: 1; color: #111111; }
+.sidebar-icon-only svg { opacity: 0.8; color: #111111; }
+.sidebar-icon-only:hover { background: #f0f0f0; }
+.sidebar-icon-only:hover svg { opacity: 1; color: #000000; }
 
 /* Collapse toggle button */
 .sidebar-collapse-btn {
@@ -793,7 +797,6 @@ body:has(.landing-container)::-webkit-scrollbar-track {
 
 /* ── Bottom privacy bar (replaces bottom tabs) ── */
 .bottom-privacy {
-  border-top: 1px solid var(--border);
   padding: 10px 20px;
   font-size: 0.78rem;
   color: var(--text-muted);
@@ -1450,6 +1453,21 @@ body:has(.auth-single-container)::-webkit-scrollbar {
   flex-shrink: 0;
   margin-top: 2px;
 }
+.circle-avatar {
+  background: #10a37f !important;
+  color: white !important;
+  border-radius: 50% !important;
+  width: 24px !important;
+  height: 24px !important;
+  margin-right: 0;
+}
+.sidebar-account-btn .circle-avatar {
+  width: 28px !important;
+  height: 28px !important;
+}
+.sidebar-collapsed .circle-avatar {
+  margin-right: 0;
+}
 
 .classic-quote {
   margin-top: 48px;
@@ -1765,3 +1783,19 @@ body:has(.auth-single-container)::-webkit-scrollbar {
 }
 
 
+/* ── Skeleton Loading ── */
+.skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #f8f8f8 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+  border-radius: 4px;
+}
+@keyframes skeleton-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.sidebar-skeleton-item {
+  height: 32px;
+  margin: 8px 12px;
+  border-radius: 6px;
+}

@@ -237,20 +237,32 @@ async def chat_message(
                     .values(conversation_id=conv_id)
                 )
 
-        new_chat = Chat(
-            user_id=current_user.id,
-            conversation_id=conv_id,
-            document_id=payload.document_ids[0] if payload.document_ids else None,
-            query=payload.query,
-            thinking=final_thinking,
-            answer=final_answer,
-            sources=[
+        # Create Chat object safely (handles case where 'thinking' column might be missing)
+        chat_data = {
+            "user_id": current_user.id,
+            "conversation_id": conv_id,
+            "document_id": payload.document_ids[0] if payload.document_ids else None,
+            "query": payload.query,
+            "answer": final_answer,
+            "sources": [
                 {"document_id": c.document_id, "page": c.page, "text": c.text[:400]}
                 for c in chunks
             ],
-            latency_ms=latency_ms,
-            cache_hit=False,
-        )
+            "latency_ms": latency_ms,
+            "cache_hit": False,
+        }
+        
+        # Only add thinking if the column actually exists in the DB table
+        # (getattr on model only checks the Python class, but we need to verify the mapped table)
+        if hasattr(Chat, 'thinking'):
+            from sqlalchemy import inspect
+            mapper = inspect(Chat)
+            if "thinking" in mapper.attrs:
+                # We also check the underlying table to be 100% safe
+                if "thinking" in Chat.__table__.columns:
+                    chat_data["thinking"] = final_thinking
+            
+        new_chat = Chat(**chat_data)
         db.add(new_chat)
         await db.commit()
 
@@ -369,8 +381,15 @@ async def chat_history(
     # Map to response objects
     responses = []
     for c in chats:
-        final_answer = c.answer
-        final_thinking = c.thinking or ""
+        final_answer = c.answer or ""
+        
+        # Safely get thinking content even if column is missing or NULL
+        final_thinking = ""
+        if hasattr(Chat, 'thinking') and "thinking" in Chat.__table__.columns:
+            try:
+                final_thinking = getattr(c, 'thinking', "") or ""
+            except Exception:
+                final_thinking = ""
         
         # Legacy/On-the-fly extraction: if thinking is empty but answer contains tags
         if not final_thinking and "<thinking>" in final_answer and "</thinking>" in final_answer:
@@ -380,14 +399,32 @@ async def chat_history(
                 final_answer = parts[1].strip()
             except Exception:
                 pass
+        
+        # Normalize sources: handle legacy 'text_snippet' vs new 'text'
+        normalized_sources = []
+        for s in (c.sources or []):
+            try:
+                # Ensure we have the required keys for SourceChunk
+                doc_id = s.get("document_id") or ""
+                page = s.get("page") or 0
+                # Fallback from 'text' to 'text_snippet' for legacy records
+                text_content = s.get("text") or s.get("text_snippet") or ""
+                
+                normalized_sources.append(SourceChunk(
+                    document_id=str(doc_id),
+                    page=int(page),
+                    text=str(text_content)
+                ))
+            except Exception:
+                continue
                 
         responses.append(ChatResponse(
             id=str(c.id),
             query=c.query or "",
             answer=final_answer,
             thinking=final_thinking,
-            sources=[SourceChunk(**s) for s in (c.sources or [])],
-            created_at=c.created_at.isoformat(),
+            sources=normalized_sources,
+            created_at=c.created_at.isoformat() if c.created_at else "",
         ))
 
     return responses

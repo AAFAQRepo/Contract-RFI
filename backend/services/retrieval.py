@@ -69,17 +69,23 @@ def dense_search(
     )
 
     # Fetch filenames from Postgres for these document IDs
-    doc_ids = list(set(r.payload.get("document_id") for r in response.points if r.payload.get("document_id")))
+    doc_ids_raw = list(set(r.payload.get("document_id") for r in response.points if r.payload.get("document_id")))
     filenames = {}
-    if doc_ids:
-        from sqlalchemy import create_engine, select, text as sa_text
+    if doc_ids_raw:
+        import uuid as _uuid
+        from sqlalchemy import create_engine, text as sa_text
         from core.config import get_settings
-        from models.models import Document
         settings = get_settings()
         engine = create_engine(settings.DATABASE_URL_SYNC)
+        
+        # Convert strings to UUID objects to avoid Postgres type mismatch
+        doc_uuids = [_uuid.UUID(did) for did in doc_ids_raw]
+        
         with engine.connect() as conn:
-            # Simple query to get id -> filename mapping
-            res = conn.execute(sa_text("SELECT id, filename FROM documents WHERE id = ANY(:ids)"), {"ids": doc_ids})
+            res = conn.execute(
+                sa_text("SELECT id, filename FROM documents WHERE id = ANY(:ids)"), 
+                {"ids": doc_uuids}
+            )
             filenames = {str(row[0]): row[1] for row in res.fetchall()}
 
     return [

@@ -38,7 +38,7 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   border-right: 1px solid #eeeeee;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   z-index: 100;
   transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;

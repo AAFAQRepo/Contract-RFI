@@ -102,7 +102,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
       </div>
 
       {/* ── Conversations (hidden when collapsed) ── */}
-      {!collapsed && (
+      {!collapsed ? (
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 8px' }}>
           {loadingConversations ? (
             <>
@@ -134,7 +134,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
             </>
           ) : null}
         </div>
-      )}
+      ) : null}
 
       {collapsed && <div style={{ flex: 1 }} />}
 

@@ -734,6 +734,11 @@ body:has(.landing-container)::-webkit-scrollbar-track {
   min-width: 48px;
 }
 
+.sidebar-collapsed .sidebar-project-item,
+.sidebar-collapsed .sidebar-section-label {
+  display: none !important;
+}
+
 /* Sidebar menu/hamburger toggle button */
 .sidebar-menu-btn {
   flex-shrink: 0;

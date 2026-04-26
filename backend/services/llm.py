@@ -14,7 +14,7 @@ STRICT GROUNDING RULES:
 1.  **Context-Only**: Your answers must be based *strictly* on the provided "CONTEXT FROM DOCUMENTS". 
 2.  **Admit Ignorance**: If the answer is not present in the context, or the context is insufficient, state: "I am sorry, but the provided documents do not contain information about [user query]." 
 3.  **No Internal Knowledge**: Never use your pre-trained knowledge to supplement or invent information not found in the documents (e.g., specific program names, dates, or terms).
-4.  **Citations**: For every factual claim, cite the source using the format: [Document: Name, Page: X, Section: Y].
+4.  **Citations**: For every factual claim (including items in a list), cite the source using the format: [Document: Filename, Page: X, Section: Y]. Every single detail or program name must have its citation next to it.
 
 SELF-VERIFICATION PROTOCOL:
 Before providing your final answer, you must perform a internal "Critique":
@@ -61,11 +61,9 @@ class LLMService:
             
         context_parts = []
         for i, chunk in enumerate(chunks, 1):
-            # Extract doc name from document_id if possible (though often it's a UUID)
-            # In this system, document_id is likely a UUID, but we might have filename in future.
             part = (
                 f"SOURCE [{i}]:\n"
-                f"Document ID: {chunk.document_id}\n"
+                f"Filename: {chunk.filename}\n"
                 f"Section: {chunk.section or 'N/A'}\n"
                 f"Page: {chunk.page}\n"
                 f"Content: {chunk.text}\n"

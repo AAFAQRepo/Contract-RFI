@@ -35,6 +35,7 @@ FINAL_TOP_K = 40        # Default maximum chunks (increased for flexibility)
 class RetrievedChunk:
     chunk_id: str
     document_id: str
+    filename: str  # Added for better citations
     text: str
     context_summary: str
     section: str
@@ -67,10 +68,25 @@ def dense_search(
         with_payload=True,
     )
 
+    # Fetch filenames from Postgres for these document IDs
+    doc_ids = list(set(r.payload.get("document_id") for r in response.points if r.payload.get("document_id")))
+    filenames = {}
+    if doc_ids:
+        from sqlalchemy import create_engine, select, text as sa_text
+        from core.config import get_settings
+        from models.models import Document
+        settings = get_settings()
+        engine = create_engine(settings.DATABASE_URL_SYNC)
+        with engine.connect() as conn:
+            # Simple query to get id -> filename mapping
+            res = conn.execute(sa_text("SELECT id, filename FROM documents WHERE id = ANY(:ids)"), {"ids": doc_ids})
+            filenames = {str(row[0]): row[1] for row in res.fetchall()}
+
     return [
         RetrievedChunk(
             chunk_id=str(r.id),
             document_id=r.payload.get("document_id", ""),
+            filename=filenames.get(r.payload.get("document_id", ""), "Unknown Document"),
             text=r.payload.get("text", ""),
             context_summary=r.payload.get("context_summary", ""),
             section=r.payload.get("section", ""),
@@ -92,10 +108,6 @@ def sparse_search(
 ) -> list[RetrievedChunk]:
     """
     Keyword-based BM25 search.
-
-    Uses PostgreSQL full-text search (ts_rank with plainto_tsquery) since
-    we already store chunk text in Postgres. This avoids the need to
-    add a separate Elasticsearch service.
     """
     from sqlalchemy import create_engine, text as sa_text
     from core.config import get_settings
@@ -109,12 +121,12 @@ def sparse_search(
         SELECT
             c.id               AS chunk_id,
             c.document_id,
+            d.filename,
             c.text,
             c.context_summary,
             c.section,
             c.page,
             c.language,
-            c.qdrant_point_id,
             ts_rank(
                 to_tsvector('english', c.text),
                 plainto_tsquery('english', :query)
@@ -139,6 +151,7 @@ def sparse_search(
         RetrievedChunk(
             chunk_id=str(row.chunk_id),
             document_id=str(row.document_id),
+            filename=row.filename,
             text=row.text,
             context_summary=row.context_summary or "",
             section=row.section or "",

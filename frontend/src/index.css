@@ -40,7 +40,7 @@ html, body, #root { height: 100%; font-family: var(--font); background: var(--bg
   flex-direction: column;
   overflow: hidden;
   z-index: 100;
-  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
   will-change: width;
 }
@@ -730,8 +730,24 @@ body:has(.landing-container)::-webkit-scrollbar-track {
 
 /* ── Collapsed Sidebar ── */
 .sidebar-collapsed {
-  width: 48px;
-  min-width: 48px;
+  width: 56px;
+  min-width: 56px;
+}
+
+.sidebar-fade-label {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar-collapsed .sidebar-fade-label {
+  opacity: 0;
+  visibility: hidden;
+  width: 0;
+  margin: 0;
+  padding: 0;
 }
 
 /* Sidebar menu/hamburger toggle button */

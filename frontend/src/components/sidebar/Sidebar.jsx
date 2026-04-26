@@ -52,13 +52,9 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           <Icon.Menu />
         </button>
 
-        {!collapsed && (
-          <>
-            <span className="sidebar-logo-text" style={{ transition: 'opacity 0.4s', opacity: collapsed ? 0 : 1 }}>
-              Contract RFI
-            </span>
-          </>
-        )}
+        <span className="sidebar-logo-text sidebar-fade-label">
+          Contract RFI
+        </span>
       </div>
 
       {/* ── Nav items ── */}
@@ -71,7 +67,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Plus />
-          {!collapsed && <span>New chat</span>}
+          <span className="sidebar-fade-label">New chat</span>
         </button>
         <button
           className="sidebar-nav-item"
@@ -81,7 +77,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Search />
-          {!collapsed && <span>Search</span>}
+          <span className="sidebar-fade-label">Search</span>
         </button>
         <button
           className="sidebar-nav-item"
@@ -89,7 +85,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Library />
-          {!collapsed && <span>Library</span>}
+          <span className="sidebar-fade-label">Library</span>
         </button>
         <button
           className="sidebar-nav-item"
@@ -97,46 +93,43 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Workflows />
-          {!collapsed && <span>Workflows</span>}
+          <span className="sidebar-fade-label">Workflows</span>
         </button>
       </div>
 
       {/* ── Conversations (hidden when collapsed) ── */}
-      {!collapsed && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 8px' }}>
-          {loadingConversations ? (
-            <>
-              <div className="sidebar-skeleton-item skeleton" />
-              <div className="sidebar-skeleton-item skeleton" style={{ width: '70%' }} />
-              <div className="sidebar-skeleton-item skeleton" style={{ width: '85%' }} />
-            </>
-          ) : conversations.length > 0 ? (
-            <>
-              <div className="sidebar-section-label">Conversations</div>
-              {conversations.map(conv => (
-                <div
-                  key={conv.id}
-                  className={`sidebar-project-item ${activeConversationId === conv.id ? 'active' : ''}`}
-                  onClick={() => {
-                    localStorage.setItem('forceHistory', 'true')
-                    setActiveConversationId(conv.id)
-                    navigate('/chat')
-                  }}
-                  title={conv.title}
-                >
-                  <span className="sidebar-project-name">{conv.title}</span>
-                  <button
-                    className="sidebar-project-more"
-                    onClick={e => { e.stopPropagation(); setCtxMenu({ id: conv.id, x: e.clientX, y: e.clientY }) }}
-                  ><Icon.More /></button>
-                </div>
-              ))}
-            </>
-          ) : null}
-        </div>
-      )}
+      <div className={`sidebar-fade-label`} style={{ flex: 1, overflowY: 'auto', padding: '0 0 8px' }}>
+        {loadingConversations ? (
+          <>
+            <div className="sidebar-skeleton-item skeleton" />
+            <div className="sidebar-skeleton-item skeleton" style={{ width: '70%' }} />
+            <div className="sidebar-skeleton-item skeleton" style={{ width: '85%' }} />
+          </>
+        ) : conversations.length > 0 ? (
+          <>
+            <div className="sidebar-section-label">Conversations</div>
+            {conversations.map(conv => (
+              <div
+                key={conv.id}
+                className={`sidebar-project-item ${activeConversationId === conv.id ? 'active' : ''}`}
+                onClick={() => {
+                  localStorage.setItem('forceHistory', 'true')
+                  setActiveConversationId(conv.id)
+                  navigate('/chat')
+                }}
+                title={conv.title}
+              >
+                <span className="sidebar-project-name">{conv.title}</span>
+                <button
+                  className="sidebar-project-more"
+                  onClick={e => { e.stopPropagation(); setCtxMenu({ id: conv.id, x: e.clientX, y: e.clientY }) }}
+                ><Icon.More /></button>
+              </div>
+            ))}
+          </>
+        ) : null}
+      </div>
 
-      {collapsed && <div style={{ flex: 1 }} />}
 
       {/* ── Context menu ── */}
       {ctxMenu && (
@@ -156,7 +149,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Help />
-          {!collapsed && <span>Help</span>}
+          <span className="sidebar-fade-label">Help</span>
         </button>
 
         <div style={{ position: 'relative' }}>
@@ -167,7 +160,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
             style={{ justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '8px 0' : '8px 10px' }}
           >
             <div className="account-avatar" title={user?.name || 'Account'}>{initial}</div>
-            {!collapsed && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.name || 'Account'}</span>}
+            <span className="sidebar-fade-label" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.name || 'Account'}</span>
           </button>
 
           {showAccount && (

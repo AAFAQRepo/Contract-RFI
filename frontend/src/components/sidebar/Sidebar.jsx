@@ -18,6 +18,8 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
     loadingConversations,
   } = useProjects()
 
+  const initial = user?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || 'U'
+
   const handleNewChat = () => {
     resetForNewChat()
     navigate('/')
@@ -40,22 +42,23 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
 
   return (
     <nav className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}>
-      {/* ── Top: Logo + Toggle ── */}
-      <div className="sidebar-logo">
-        <div className="logo-icon-wrap" style={{ margin: collapsed ? '0 auto' : '0' }}>
-          <Logo />
-        </div>
-        
-        <div className="sidebar-toggle-wrapper" style={{ display: collapsed ? 'contents' : 'block' }}>
-          <button
-            className="sidebar-menu-btn"
-            onClick={() => setCollapsed(v => !v)}
-            title={collapsed ? 'Open sidebar' : 'Close sidebar'}
-            style={{ border: 'none', background: 'none' }}
-          >
-            <Icon.Columns />
-          </button>
-        </div>
+      {/* ── Top: Menu toggle + Logo ── */}
+      <div className="sidebar-logo" style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}>
+        <button
+          className="sidebar-icon-only sidebar-menu-btn"
+          onClick={() => setCollapsed(v => !v)}
+          title={collapsed ? 'Open sidebar' : 'Close sidebar'}
+        >
+          <Icon.Menu />
+        </button>
+
+        {!collapsed && (
+          <>
+            <span className="sidebar-logo-text" style={{ transition: 'opacity 0.4s', opacity: collapsed ? 0 : 1 }}>
+              Contract RFI
+            </span>
+          </>
+        )}
       </div>
 
       {/* ── Nav items ── */}
@@ -64,21 +67,21 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
           className="sidebar-nav-item"
           onClick={handleNewChat}
           id="new-project-btn"
-          title="New project"
+          title="New chat"
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Plus />
-          {!collapsed && <span>New project</span>}
+          {!collapsed && <span>New chat</span>}
         </button>
         <button
           className="sidebar-nav-item"
           onClick={() => { if (collapsed) setCollapsed(false); setShowSearch(true) }}
           id="search-projects-btn"
-          title="Projects"
+          title="Search"
           style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Search />
-          {!collapsed && <span>Projects</span>}
+          {!collapsed && <span>Search</span>}
         </button>
         <button
           className="sidebar-nav-item"
@@ -98,7 +101,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
         </button>
       </div>
 
-      {/* ── Conversations / Recent ── */}
+      {/* ── Conversations (hidden when collapsed) ── */}
       {!collapsed && (
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 8px' }}>
           {loadingConversations ? (
@@ -109,7 +112,7 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
             </>
           ) : conversations.length > 0 ? (
             <>
-              <div className="sidebar-section-label">Recent</div>
+              <div className="sidebar-section-label">Conversations</div>
               {conversations.map(conv => (
                 <div
                   key={conv.id}
@@ -146,11 +149,11 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
       )}
 
       {/* ── Bottom: Help + Account ── */}
-      <div className="sidebar-bottom" style={{ borderTop: '1px solid #eeeeee', padding: '8px 0' }}>
+      <div className="sidebar-bottom" style={{ alignItems: collapsed ? 'center' : 'stretch' }}>
         <button
           className="sidebar-nav-item"
           title="Help"
-          style={{ justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '8px 0' : '8px 16px' }}
+          style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
         >
           <Icon.Help />
           {!collapsed && <span>Help</span>}
@@ -161,22 +164,10 @@ export default function Sidebar({ collapsed, setCollapsed, setShowSearch }) {
             className="sidebar-account-btn"
             id="account-btn"
             onClick={() => setShowAccount(v => !v)}
-            style={{ 
-              justifyContent: collapsed ? 'center' : 'flex-start', 
-              padding: collapsed ? '8px 0' : '8px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              width: '100%',
-              border: 'none',
-              background: 'none',
-              cursor: 'pointer',
-              color: '#333333',
-              fontSize: '0.88rem',
-              gap: '12px'
-            }}
+            style={{ justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '8px 0' : '8px 10px' }}
           >
-            <Icon.User />
-            {!collapsed && <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Account</span>}
+            <div className="account-avatar" title={user?.name || 'Account'}>{initial}</div>
+            {!collapsed && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.name || 'Account'}</span>}
           </button>
 
           {showAccount && (

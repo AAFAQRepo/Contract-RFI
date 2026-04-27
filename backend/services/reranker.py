@@ -35,13 +35,12 @@ def rerank_chunks(
     query: str,
     chunks,  # list[RetrievedChunk]
     top_k: int = 5,
+    threshold: Optional[float] = -4.0,  # BGE-v2-m3 specific soft threshold
 ) -> list:
     """
     Re-score `chunks` against `query` using the cross-encoder.
     Returns the top `top_k` chunks sorted by reranker score (highest first).
-
-    The cross-encoder reads the full (query, chunk_text) pair, making it far
-    more accurate than cosine similarity alone.
+    If a threshold is provided, chunks with scores below it are discarded.
     """
     if not chunks:
         return []
@@ -54,11 +53,21 @@ def rerank_chunks(
     # Get relevance scores (single float per pair)
     scores = reranker.predict(pairs, show_progress_bar=False)
 
-    # Attach scores and sort
-    scored = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
+    # Attach scores
+    scored = zip(scores, chunks)
+
+    # Filter by threshold if applicable
+    if threshold is not None:
+        scored = [(s, c) for s, c in scored if s >= threshold]
+        discarded = len(chunks) - len(scored)
+        if discarded > 0:
+            print(f"📉 Reranker: discarded {discarded} chunks below threshold ({threshold})")
+
+    # Sort and take top_k
+    sorted_scored = sorted(scored, key=lambda x: x[0], reverse=True)
 
     result = []
-    for score, chunk in scored[:top_k]:
+    for score, chunk in sorted_scored[:top_k]:
         chunk.score = float(score)
         result.append(chunk)
 

@@ -169,14 +169,14 @@ def finalize_document_ingestion(results, document_id: str, user_id: str, filenam
             headings = dl_meta.get("headings", [])
             section = headings[0] if headings else ""
 
-            # Extract page number (already adjusted by offset in the worker)
-            page = 0
+            # Extract page number (adjusted to 1-indexed)
+            page = 1
             doc_items = dl_meta.get("doc_items", [])
             if doc_items:
                 for item in doc_items:
                     for prov in item.get("prov", []):
-                        if prov.get("page_no", 0) > page:
-                            page = prov["page_no"]
+                        if (prov.get("page_no", 0) + 1) > page:
+                            page = prov["page_no"] + 1
 
             db_chunks.append(Chunk(
                 id=str(_uuid.uuid4()),

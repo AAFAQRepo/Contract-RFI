@@ -24,9 +24,9 @@ from services.embedding import embed_query
 
 DENSE_TOP_K = 30       # Number of candidates from dense search
 SPARSE_TOP_K = 30      # Number of candidates from sparse (BM25) search
-RRF_K = 60             # Standard RRF constant (controls score smoothing)
+RRF_K = 60             # Standard RRF constant
 RERANK_TOP_K = 50      # Chunks passed to the reranker
-FINAL_TOP_K = 20        # Final returned chunks after reranking
+FINAL_TOP_K = 40        # Default maximum chunks (increased for flexibility)
 
 
 # ── Data Structures ──────────────────────────────────────────────────────────
@@ -35,6 +35,7 @@ FINAL_TOP_K = 20        # Final returned chunks after reranking
 class RetrievedChunk:
     chunk_id: str
     document_id: str
+    filename: str  # Added for better citations
     text: str
     context_summary: str
     section: str
@@ -67,10 +68,31 @@ def dense_search(
         with_payload=True,
     )
 
+    # Fetch filenames from Postgres for these document IDs
+    doc_ids_raw = list(set(r.payload.get("document_id") for r in response.points if r.payload.get("document_id")))
+    filenames = {}
+    if doc_ids_raw:
+        import uuid as _uuid
+        from sqlalchemy import create_engine, text as sa_text
+        from core.config import get_settings
+        settings = get_settings()
+        engine = create_engine(settings.DATABASE_URL_SYNC)
+        
+        # Convert strings to UUID objects to avoid Postgres type mismatch
+        doc_uuids = [_uuid.UUID(did) for did in doc_ids_raw]
+        
+        with engine.connect() as conn:
+            res = conn.execute(
+                sa_text("SELECT id, filename FROM documents WHERE id = ANY(:ids)"), 
+                {"ids": doc_uuids}
+            )
+            filenames = {str(row[0]): row[1] for row in res.fetchall()}
+
     return [
         RetrievedChunk(
             chunk_id=str(r.id),
             document_id=r.payload.get("document_id", ""),
+            filename=filenames.get(r.payload.get("document_id", ""), "Unknown Document"),
             text=r.payload.get("text", ""),
             context_summary=r.payload.get("context_summary", ""),
             section=r.payload.get("section", ""),
@@ -92,10 +114,6 @@ def sparse_search(
 ) -> list[RetrievedChunk]:
     """
     Keyword-based BM25 search.
-
-    Uses PostgreSQL full-text search (ts_rank with plainto_tsquery) since
-    we already store chunk text in Postgres. This avoids the need to
-    add a separate Elasticsearch service.
     """
     from sqlalchemy import create_engine, text as sa_text
     from core.config import get_settings
@@ -109,12 +127,12 @@ def sparse_search(
         SELECT
             c.id               AS chunk_id,
             c.document_id,
+            d.filename,
             c.text,
             c.context_summary,
             c.section,
             c.page,
             c.language,
-            c.qdrant_point_id,
             ts_rank(
                 to_tsvector('english', c.text),
                 plainto_tsquery('english', :query)
@@ -139,6 +157,7 @@ def sparse_search(
         RetrievedChunk(
             chunk_id=str(row.chunk_id),
             document_id=str(row.document_id),
+            filename=row.filename,
             text=row.text,
             context_summary=row.context_summary or "",
             section=row.section or "",
@@ -201,6 +220,7 @@ class HybridRetriever:
         document_id: Optional[str] = None,
         top_k: int = FINAL_TOP_K,
         rerank: bool = True,
+        rerank_threshold: Optional[float] = -4.0,
     ) -> list[RetrievedChunk]:
 
         print(f"🔍 Dense search for: {query[:80]}...")
@@ -227,8 +247,10 @@ class HybridRetriever:
         # Reranking
         if rerank and candidates:
             from services.reranker import rerank_chunks
-            candidates = rerank_chunks(query, candidates, top_k=top_k)
+            candidates = rerank_chunks(query, candidates, top_k=top_k, threshold=rerank_threshold)
             print(f"⚡ Reranked → top {len(candidates)}")
+            if candidates:
+                print(f"   └─ Top rerank score: {candidates[0].score:.4f}")
         else:
             candidates = candidates[:top_k]
 

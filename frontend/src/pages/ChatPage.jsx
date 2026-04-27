@@ -390,7 +390,7 @@ export default function ChatPage() {
                       isStreaming={msg.isStreaming} 
                     />
               )}
-              {sending && !messages.some(msg => msg.role === 'ai' && msg.isStreaming) && (
+              {sending && messages[messages.length - 1]?.role !== 'ai' && (
                 <div className="msg-ai">
                   <div className="thinking-block" style={{ pointerEvents: 'none' }}>
                     <div className="thinking-toggle" style={{ cursor: 'default' }}>

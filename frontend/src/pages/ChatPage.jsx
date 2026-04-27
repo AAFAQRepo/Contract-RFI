@@ -139,7 +139,15 @@ export default function ChatPage() {
       let aiMessageId = Date.now() + 1
       let fullContent = ''
 
-      setMessages(m => [...m, { id: aiMessageId, role: 'ai', text: '', thinking: '', sources: [] }])
+      setMessages(m => [...m, { 
+        id: aiMessageId, 
+        role: 'ai', 
+        text: '', 
+        thinking: '', 
+        sources: [], 
+        isStreaming: true,
+        isThinkingDone: false 
+      }])
 
       while (true) {
         const { done, value } = await reader.read()
@@ -150,6 +158,7 @@ export default function ChatPage() {
 
         let currentThinking = ''
         let currentAnswer = fullContent
+        let isThinkingDone = false
 
         if (fullContent.includes('<thinking>')) {
           const parts = fullContent.split('<thinking>')
@@ -157,6 +166,7 @@ export default function ChatPage() {
             const innerParts = parts[1].split('</thinking>')
             currentThinking = innerParts[0].trim()
             currentAnswer = innerParts[1].trim()
+            isThinkingDone = true
           } else {
             currentThinking = parts[1].trim()
             currentAnswer = ''
@@ -165,10 +175,15 @@ export default function ChatPage() {
 
         setMessages(m => m.map(msg =>
           msg.id === aiMessageId
-            ? { ...msg, text: currentAnswer, thinking: currentThinking }
+            ? { ...msg, text: currentAnswer, thinking: currentThinking, isThinkingDone }
             : msg
         ))
       }
+
+      // Mark streaming as finished
+      setMessages(m => m.map(msg =>
+        msg.id === aiMessageId ? { ...msg, isStreaming: false } : msg
+      ))
 
       // After the first message, refresh conversations to show the new one in sidebar
       // and fetch its scoped documents (the backend links them during this call)
@@ -365,7 +380,15 @@ export default function ChatPage() {
               {messages.map(msg =>
                 msg.role === 'user'
                   ? <UserMessage key={msg.id} id={msg.id} text={msg.text} />
-                  : <AIMessage key={msg.id} id={msg.id} text={msg.text} thinking={msg.thinking} sources={msg.sources} />
+                  : <AIMessage 
+                      key={msg.id} 
+                      id={msg.id} 
+                      text={msg.text} 
+                      thinking={msg.thinking} 
+                      isThinkingDone={msg.isThinkingDone} 
+                      sources={msg.sources} 
+                      isStreaming={msg.isStreaming} 
+                    />
               )}
               {sending && (
                 <div className="msg-ai">

@@ -867,6 +867,14 @@ body:has(.landing-container)::-webkit-scrollbar-track {
   animation: pulse-dot 1.4s ease-in-out infinite;
   display: inline-block;
 }
+.thinking-dot-anim.stopped {
+  animation: none;
+  opacity: 0.6;
+  background: var(--text-muted);
+}
+.thinking-block.is-done {
+  opacity: 0.9;
+}
 @keyframes pulse-dot {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }

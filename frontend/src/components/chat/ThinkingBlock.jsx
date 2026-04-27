@@ -1,16 +1,29 @@
-import { useState, useEffect } from 'react'
-import { Icon } from '../common/Icon'
+import { useState, useEffect, useRef } from 'react'
 
 /**
  * Collapsible thinking block for AI responses.
- * Auto-opens when thinking content first arrives.
+ * Auto-opens when thinking starts, auto-collapses when thinking finishes.
  */
-export default function ThinkingBlock({ thinking }) {
+export default function ThinkingBlock({ thinking, isDone }) {
   const [open, setOpen] = useState(false)
+  const wasOpenedRef = useRef(false)
 
   useEffect(() => {
-    if (thinking && thinking.trim().length > 0) setOpen(true)
+    if (thinking && thinking.trim().length > 0 && !wasOpenedRef.current) {
+      setOpen(true)
+      wasOpenedRef.current = true
+    }
   }, [!!thinking])
+
+  useEffect(() => {
+    if (isDone && open) {
+      // Small delay before collapsing so the user sees it finished
+      const timer = setTimeout(() => {
+        setOpen(false)
+      }, 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [isDone])
 
   if (!thinking) return null
 
@@ -23,10 +36,10 @@ export default function ThinkingBlock({ thinking }) {
   })
 
   return (
-    <div className="thinking-block">
+    <div className={`thinking-block ${isDone ? 'is-done' : ''}`}>
       <button className="thinking-toggle" onClick={() => setOpen(v => !v)}>
-        <span className="thinking-dot-anim"></span>
-        <span>Thinking</span>
+        <span className={`thinking-dot-anim ${isDone ? 'stopped' : ''}`}></span>
+        <span>{isDone ? 'Thought process' : 'Thinking'}</span>
         <span className={`thinking-chevron ${open ? 'open' : ''}`}></span>
       </button>
       {open && (

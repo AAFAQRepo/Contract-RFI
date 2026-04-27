@@ -22,10 +22,12 @@ export function UserMessage({ id, text }) {
 export function AIMessage({ id, text, thinking, isThinkingDone, sources, isStreaming }) {
   return (
     <div className="msg-ai">
-      <ThinkingBlock thinking={thinking} isDone={isThinkingDone} />
-      
       <div className="msg-ai-body">
-        {isStreaming ? (
+        {isStreaming && !text ? (
+          <div className="ai-typing-indicator">
+            <span></span><span></span><span></span>
+          </div>
+        ) : isStreaming ? (
           <Typewriter text={text} speed={10} isStreaming={true} />
         ) : (
           <div dangerouslySetInnerHTML={{ __html: formatAIText(text) }} />

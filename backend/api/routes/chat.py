@@ -98,77 +98,86 @@ async def chat_message(
     elif payload.document_ids:
         print(f"⚠️ No RAG context survived the threshold ({RERANK_THRESHOLD}) for this query.")
 
-    # 2. Generator for Streaming
-    async def event_generator():
-        full_answer = ""
-        in_thinking = False
-        
-        # If no chunks survived, we pass a specialized hint to the LLM 
-        # so it doesn't try to answer from internal knowledge.
-        effective_chunks = chunks
-        
-        async for token in llm_service.generate_response_stream(
-            query=payload.query,
-            chunks=effective_chunks,
-            user_name=current_user.name or "User"
-        ):
-            full_answer += token
-            if "<thinking>" in token: in_thinking = True
-            if "</thinking>" in token: in_thinking = False
-            yield token
+    # 2. Agentic RAG Pipeline (Phase 2: The Verification Pipeline)
+    # ----------------------------------------------------------------------
+    # Step A: Draft & Audit (Internal)
+    full_draft_text = ""
+    async for token in llm_service.generate_response_stream(
+        query=payload.query,
+        chunks=chunks,
+        user_name=current_user.name or "User"
+    ):
+        full_draft_text += token
 
-        # 3. Final Persistence (after stream finishes)
-        latency_ms = int((time.time() - start_time) * 1000)
-        
-        final_thinking = ""
-        final_answer = full_answer
-        if "<thinking>" in full_answer and "</thinking>" in full_answer:
-            parts = full_answer.split("</thinking>", 1)
-            final_thinking = parts[0].replace("<thinking>", "").strip()
-            final_answer = parts[1].strip()
+    # Parse draft
+    final_thinking = ""
+    draft_answer = full_draft_text
+    if "<thinking>" in full_draft_text and "</thinking>" in full_draft_text:
+        parts = full_draft_text.split("</thinking>", 1)
+        final_thinking = parts[0].replace("<thinking>", "").strip()
+        draft_answer = parts[1].strip()
 
-        # Save to DB
-        from models.models import Conversation, Document
-        from sqlalchemy import update as sa_update
-        
-        conv_id = payload.conversation_id
-        if not conv_id:
-            # Create new conversation with title from query
-            new_conv = Conversation(
-                user_id=current_user.id,
-                title=payload.query[:50] + "..." if len(payload.query) > 50 else payload.query
-            )
-            db.add(new_conv)
-            await db.flush()
-            conv_id = new_conv.id
+    # Step B: Agentic Audit & Correction
+    final_answer = draft_answer
+    if chunks:
+        corrected = await llm_service.verify_and_correct_response(payload.query, chunks, draft_answer)
+        if corrected:
+            final_answer = corrected
+            print("🕵️ Auditor corrected the response.")
 
-            # Link all pending documents to this new conversation
-            if payload.document_ids:
-                await db.execute(
-                    sa_update(Document)
-                    .where(Document.id.in_(payload.document_ids))
-                    .where(Document.user_id == current_user.id)
-                    .values(conversation_id=conv_id)
-                )
-
-        new_chat = Chat(
+    # 3. Final Persistence (using verified content)
+    # ----------------------------------------------------------------------
+    latency_ms = int((time.time() - start_time) * 1000)
+    from models.models import Conversation, Document, Chat
+    from sqlalchemy import update as sa_update
+    
+    conv_id = payload.conversation_id
+    if not conv_id:
+        new_conv = Conversation(
             user_id=current_user.id,
-            conversation_id=conv_id,
-            document_id=payload.document_ids[0] if payload.document_ids else None,
-            query=payload.query,
-            answer=final_answer,
-            thinking=final_thinking,
-            sources=[{"document_id": c.document_id, "page": c.page, "text": c.text[:200]} for c in chunks],
-            latency_ms=latency_ms,
-            cache_hit=False
+            title=payload.query[:50] + "..." if len(payload.query) > 50 else payload.query
         )
-        db.add(new_chat)
-        await db.commit()
+        db.add(new_conv)
+        await db.flush()
+        conv_id = new_conv.id
+        if payload.document_ids:
+            await db.execute(
+                sa_update(Document)
+                .where(Document.id.in_(payload.document_ids))
+                .where(Document.user_id == current_user.id)
+                .values(conversation_id=conv_id)
+            )
 
-        # Increment usage
-        await increment_usage(current_user.org_id, "queries", db)
+    new_chat = Chat(
+        user_id=current_user.id,
+        conversation_id=conv_id,
+        document_id=payload.document_ids[0] if payload.document_ids else None,
+        query=payload.query,
+        answer=final_answer,
+        thinking=final_thinking,
+        sources=[{"document_id": c.document_id, "page": c.page, "text": c.text[:200]} for c in chunks],
+        latency_ms=latency_ms,
+        cache_hit=False
+    )
+    db.add(new_chat)
+    
+    # Increment usage
+    await increment_usage(current_user.org_id, "queries", db)
+    await db.commit()
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    # 4. Return Final Verified Stream
+    # ----------------------------------------------------------------------
+    async def verified_generator():
+        # First send the thinking tag (hidden by UI logic but kept for history)
+        yield f"<thinking>{final_thinking}</thinking>\n"
+        
+        # Stream the verified answer for smooth UI experience
+        words = final_answer.split(' ')
+        for i, word in enumerate(words):
+            yield word + (' ' if i < len(words) - 1 else '')
+            await asyncio.sleep(0.01)
+
+    return StreamingResponse(verified_generator(), media_type="text/event-stream")
 
 @router.get("/conversations")
 async def list_conversations(

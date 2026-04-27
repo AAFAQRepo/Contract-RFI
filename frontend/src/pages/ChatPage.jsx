@@ -65,10 +65,9 @@ export default function ChatPage() {
 
   // Load chat history when active conversation changes
   useEffect(() => {
-    setMessages([])
-    setPendingFiles([])
-
     if (!activeConversationId) {
+      setMessages([])
+      setPendingFiles([])
       setTopbarVisible(false)
       setShowFiles(false)
       return
@@ -82,6 +81,8 @@ export default function ChatPage() {
     }
 
     // Entering an existing conversation: show topbar immediately
+    setMessages([])
+    setPendingFiles([])
     setTopbarVisible(true)
     setShowFiles(true)
     if (!localStorage.getItem('forceHistory')) return

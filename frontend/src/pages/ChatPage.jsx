@@ -38,6 +38,7 @@ export default function ChatPage() {
   const [topbarVisible, setTopbarVisible] = useState(false)
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
+  const justCreatedConvRef = useRef(false)
 
   // Scroll to bottom on new messages
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
@@ -72,6 +73,14 @@ export default function ChatPage() {
       setShowFiles(false)
       return
     }
+
+    // NEW: If we just created this conversation, don't reload history
+    // We already have the streaming message in state.
+    if (justCreatedConvRef.current) {
+      justCreatedConvRef.current = false
+      return
+    }
+
     // Entering an existing conversation: show topbar immediately
     setTopbarVisible(true)
     setShowFiles(true)
@@ -204,6 +213,7 @@ export default function ChatPage() {
         if (Array.isArray(r.data) && r.data.length > 0) {
           const newConvId = r.data[0].id
           localStorage.setItem('forceHistory', 'true')
+          justCreatedConvRef.current = true
           setActiveConversationId(newConvId)
           // Fetch and merge conversation docs to reflect the newly linked files
           await fetchConversationDocs(newConvId)

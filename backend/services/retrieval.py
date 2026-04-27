@@ -14,6 +14,8 @@ Usage:
 
 from dataclasses import dataclass
 from typing import Optional
+import uuid
+from sqlalchemy import create_engine, text as sa_text
 
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 
@@ -73,14 +75,12 @@ def dense_search(
     doc_ids_raw = list(set(r.payload.get("document_id") for r in response.points if r.payload.get("document_id")))
     filenames = {}
     if doc_ids_raw:
-        import uuid as _uuid
-        from sqlalchemy import create_engine, text as sa_text
         from core.config import get_settings
         settings = get_settings()
         engine = create_engine(settings.DATABASE_URL_SYNC)
         
         # Convert strings to UUID objects to avoid Postgres type mismatch
-        doc_uuids = [_uuid.UUID(did) for did in doc_ids_raw]
+        doc_uuids = [uuid.UUID(str(did)) for did in doc_ids_raw]
         
         with engine.connect() as conn:
             res = conn.execute(
@@ -116,7 +116,6 @@ def sparse_search(
     """
     Keyword-based BM25 search.
     """
-    from sqlalchemy import create_engine, text as sa_text
     from core.config import get_settings
 
     settings = get_settings()
@@ -125,17 +124,17 @@ def sparse_search(
     doc_filter = "AND c.document_id = :document_id" if document_id else ""
 
     sql = f"""
-        SELECT
-            c.id               AS chunk_id,
-            c.document_id,
-            d.filename,
-            c.text,
-            c.context_summary,
-            c.section,
-            c.page,
+        SELECT 
+            c.id               AS chunk_id, 
+            c.document_id, 
+            d.filename, 
+            c.text, 
+            c.context_summary, 
+            c.section, 
+            c.page, 
             c.language,
             ts_rank(
-                to_tsvector('english', c.text),
+                to_tsvector('english', c.text), 
                 plainto_tsquery('english', :query)
             ) AS bm25_score
         FROM chunks c
@@ -147,9 +146,13 @@ def sparse_search(
         LIMIT :top_k
     """
 
-    params = {"query": query, "user_id": user_id, "top_k": top_k}
+    params = {
+        "query": query, 
+        "user_id": uuid.UUID(str(user_id)), 
+        "top_k": top_k
+    }
     if document_id:
-        params["document_id"] = document_id
+        params["document_id"] = uuid.UUID(str(document_id))
 
     with engine.connect() as conn:
         rows = conn.execute(sa_text(sql), params).fetchall()
@@ -257,7 +260,6 @@ class HybridRetriever:
 
     def expand_with_neighbors(self, chunks: list[RetrievedChunk], n: int) -> list[RetrievedChunk]:
         """Fetch neighboring chunks for each seed chunk to provide continuity."""
-        from sqlalchemy import create_engine, text as sa_text
         from core.config import get_settings
         settings = get_settings()
         engine = create_engine(settings.DATABASE_URL_SYNC)
@@ -273,7 +275,7 @@ class HybridRetriever:
             # Get current indices
             res = conn.execute(
                 sa_text("SELECT id, document_id, chunk_index FROM chunks WHERE id = ANY(:ids)"),
-                {"ids": [str(cid) for cid in chunk_ids]}
+                {"ids": [uuid.UUID(str(cid)) for cid in chunk_ids]}
             )
             seeds = res.fetchall()
             
@@ -288,8 +290,8 @@ class HybridRetriever:
                 if idx is None: continue
                 # Define neighbor range
                 for i in range(1, n + 1):
-                    neighbor_queries.append((str(doc_id), idx - i))
-                    neighbor_queries.append((str(doc_id), idx + i))
+                    neighbor_queries.append((doc_id, idx - i))
+                    neighbor_queries.append((doc_id, idx + i))
             
             if not neighbor_queries:
                 return chunks
@@ -307,7 +309,7 @@ class HybridRetriever:
                     WHERE c.document_id = ANY(:doc_ids) 
                       AND c.chunk_index = ANY(:indices)
                 """),
-                {"doc_ids": unique_doc_ids, "indices": neighbor_indices}
+                {"doc_ids": [uuid.UUID(str(did)) for did in unique_doc_ids], "indices": neighbor_indices}
             )
             
             for row in res.fetchall():

@@ -74,16 +74,27 @@ async def chat_message(
         )
         chunks.extend(doc_chunks)
 
-    # Re-rank combined results by score, keep top TOTAL_TOP_K
-    # This is now flexible: if only 3 chunks pass the threshold, we take 3. 
-    # If 30 pass, we take 30.
-    chunks = sorted(chunks, key=lambda c: getattr(c, 'score', 0), reverse=True)[:TOTAL_TOP_K]
+    # Re-rank combined results by score, keep top TOTAL_TOP_K seeds
+    # We pick the top 8 'seed' chunks and then expand them.
+    SEED_TOP_K = 8
+    seeds = sorted(chunks, key=lambda c: getattr(c, 'score', 0), reverse=True)[:SEED_TOP_K]
 
-    # Diagnostic logging
-    if chunks:
-        best_score = getattr(chunks[0], 'score', 0)
-        print(f"📊 Final RAG Context: {len(chunks)} chunks, best score: {best_score:.4f}")
+    # 2. Adjacent Chunk Expansion (Industry Standard for long-form documents)
+    # Fetch 1 chunk before and 1 after for each seed to ensure semantic continuity.
+    if seeds:
+        print(f"🔗 Expanding {len(seeds)} seed chunks with neighbors...")
+        chunks = retriever.expand_with_neighbors(seeds, n=1)
+        print(f"   └─ Total context size: {len(chunks)} chunks after expansion & deduplication")
     else:
+        chunks = []
+
+    # 3. Confidence Gating (Basic)
+    if payload.document_ids and seeds:
+        best_score = getattr(seeds[0], 'score', 0)
+        print(f"📊 Best Rerank Score: {best_score:.4f}")
+        if best_score < -6.0:
+            print(f"🛑 Confidence Gate: Score {best_score:.4f} is very low. LLM will likely refuse.")
+    elif payload.document_ids:
         print(f"⚠️ No RAG context survived the threshold ({RERANK_THRESHOLD}) for this query.")
 
     # 2. Generator for Streaming

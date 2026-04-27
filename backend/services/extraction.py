@@ -318,7 +318,7 @@ def _build_lc_docs_from_document(document: Any, offset_page_no: int = 0) -> list
         chunks_iter = chunker.chunk(document)
 
     out: list[_ChunkDoc] = []
-    for chunk in chunks_iter:
+    for i, chunk in enumerate(chunks_iter):
         text = _serialize_chunk(chunker, chunk).strip()
         if not text:
             continue
@@ -346,7 +346,10 @@ def _build_lc_docs_from_document(document: Any, offset_page_no: int = 0) -> list
         out.append(
             _ChunkDoc(
                 page_content=text,
-                metadata={"dl_meta": {"headings": headings, "doc_items": doc_items}},
+                metadata={
+                    "dl_meta": {"headings": headings, "doc_items": doc_items},
+                    "chunk_index": i
+                },
             )
         )
 

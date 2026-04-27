@@ -42,6 +42,7 @@ class RetrievedChunk:
     page: int
     language: str
     score: float
+    chunk_index: Optional[int] = None # For neighbor expansion sorting
 
 
 # ── Dense Search ─────────────────────────────────────────────────────────────
@@ -249,9 +250,93 @@ class HybridRetriever:
             from services.reranker import rerank_chunks
             candidates = rerank_chunks(query, candidates, top_k=top_k, threshold=rerank_threshold)
             print(f"⚡ Reranked → top {len(candidates)}")
-            if candidates:
-                print(f"   └─ Top rerank score: {candidates[0].score:.4f}")
         else:
             candidates = candidates[:top_k]
 
         return candidates
+
+    def expand_with_neighbors(self, chunks: list[RetrievedChunk], n: int) -> list[RetrievedChunk]:
+        """Fetch neighboring chunks for each seed chunk to provide continuity."""
+        from sqlalchemy import create_engine, text as sa_text
+        from core.config import get_settings
+        settings = get_settings()
+        engine = create_engine(settings.DATABASE_URL_SYNC)
+
+        # 1. Identify all target chunk indices
+        # We need chunk_index from the DB for these chunks.
+        # Currently RetrievedChunk doesn't have chunk_index. Let's fetch it first.
+        chunk_ids = [c.chunk_id for c in chunks]
+        
+        expanded_chunks_map = {c.chunk_id: c for c in chunks}
+        
+        with engine.connect() as conn:
+            # Get current indices
+            res = conn.execute(
+                sa_text("SELECT id, document_id, chunk_index FROM chunks WHERE id = ANY(:ids)"),
+                {"ids": [str(cid) for cid in chunk_ids]}
+            )
+            seeds = res.fetchall()
+            
+            # Map chunk_id to index for sorting seeds later
+            idx_map = {str(row[0]): row[2] for row in seeds}
+            for c in chunks:
+                c.chunk_index = idx_map.get(c.chunk_id)
+
+            neighbor_queries = []
+            for row in seeds:
+                cid, doc_id, idx = row
+                if idx is None: continue
+                # Define neighbor range
+                for i in range(1, n + 1):
+                    neighbor_queries.append((str(doc_id), idx - i))
+                    neighbor_queries.append((str(doc_id), idx + i))
+            
+            if not neighbor_queries:
+                return chunks
+
+            unique_doc_ids = list(set(q[0] for q in neighbor_queries))
+            neighbor_indices = [q[1] for q in neighbor_queries]
+            
+            res = conn.execute(
+                sa_text("""
+                    SELECT 
+                        c.id, c.document_id, d.filename, c.text, 
+                        c.context_summary, c.section, c.page, c.language, c.chunk_index
+                    FROM chunks c
+                    JOIN documents d ON d.id = c.document_id
+                    WHERE c.document_id = ANY(:doc_ids) 
+                      AND c.chunk_index = ANY(:indices)
+                """),
+                {"doc_ids": unique_doc_ids, "indices": neighbor_indices}
+            )
+            
+            for row in res.fetchall():
+                rid = str(row[0])
+                if rid not in expanded_chunks_map:
+                    expanded_chunks_map[rid] = RetrievedChunk(
+                        chunk_id=rid,
+                        document_id=str(row[1]),
+                        filename=row[2],
+                        text=row[3],
+                        context_summary=row[4],
+                        section=row[5],
+                        page=row[6],
+                        language=row[7],
+                        score=0.0,
+                        chunk_index=row[8]
+                    )
+
+        # Final sorting by document + chunk_index to ensure continuity
+        result = list(expanded_chunks_map.values())
+        result.sort(key=lambda x: (x.document_id, x.chunk_index or 0))
+        
+        # Deduplication by text content (sometimes adjacent chunks overlap or repeat)
+        seen_text = set()
+        deduped = []
+        for c in result:
+            txt_norm = c.text.strip()
+            if txt_norm and txt_norm not in seen_text:
+                deduped.append(c)
+                seen_text.add(txt_norm)
+        
+        return deduped

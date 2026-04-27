@@ -54,11 +54,11 @@ def test_task(message: str) -> dict:
 
 
 @celery_app.task(name="workers.extract_chunk_task", max_retries=3)
-def extract_chunk_task(chunk_bytes: bytes, filename: str, offset_page_no: int) -> tuple[list[dict], list[list[float]], str, int]:
+def extract_chunk_task(chunk_bytes: bytes, filename: str, offset_page_no: int) -> tuple[list[dict], list[list[float]], str, int, int]:
     """
     Worker task: Extracts text AND generates embeddings for a PDF chunk.
     Distributing embedding inference across workers improves speed and spreads GPU load.
-    Returns (serialized_lc_docs, embeddings, full_text, page_count).
+    Returns (serialized_docs, embeddings, full_text, page_count, offset_page_no).
     """
     from services.extraction import extract_and_chunk
     from services.embedding import embed_passages
@@ -74,7 +74,7 @@ def extract_chunk_task(chunk_bytes: bytes, filename: str, offset_page_no: int) -
         {"page_content": d.page_content, "metadata": d.metadata}
         for d in lc_docs
     ]
-    return serialized_docs, embeddings, full_text, page_count
+    return serialized_docs, embeddings, full_text, page_count, offset_page_no
 
 
 @celery_app.task(name="workers.finalize_document_ingestion")
@@ -92,14 +92,16 @@ def finalize_document_ingestion(results, document_id: str, user_id: str, filenam
     from services.embedding import store_docling_chunks_in_qdrant
     from services.extraction import _ChunkDoc  # For type hinting if needed
 
-    # results is a list of [serialized_docs, embeddings, full_text, page_count]
+    # results is a list of [serialized_docs, embeddings, full_text, page_count, offset_page_no]
     all_lc_docs = []
     all_embeddings = []
     merged_full_text_parts = []
     total_page_count = 0
 
-    # Sort results by offset (implicitly stored in results order if using chord)
-    for sc_docs, embeddings, full_text, page_count in results:
+    # Sort results by offset_page_no to maintain document order
+    sorted_results = sorted(results, key=lambda x: x[4])
+
+    for sc_docs, embeddings, full_text, page_count, offset in sorted_results:
         # Reconstruct _ChunkDoc objects
         all_lc_docs.extend([
             _ChunkDoc(page_content=d["page_content"], metadata=d["metadata"])
@@ -163,7 +165,7 @@ def finalize_document_ingestion(results, document_id: str, user_id: str, filenam
         print(f"💾 Storing {len(all_lc_docs)} chunks in database...")
         db_chunks = []
 
-        for lc_doc, point_id in zip(all_lc_docs, point_ids):
+        for i, (lc_doc, point_id) in enumerate(zip(all_lc_docs, point_ids)):
             meta = lc_doc.metadata or {}
             dl_meta = meta.get("dl_meta", {})
             headings = dl_meta.get("headings", [])
@@ -181,6 +183,7 @@ def finalize_document_ingestion(results, document_id: str, user_id: str, filenam
             db_chunks.append(Chunk(
                 id=str(_uuid.uuid4()),
                 document_id=document_id,
+                chunk_index=i,
                 chunk_type="retrieval",
                 text=lc_doc.page_content,
                 context_summary=f"[Page {page}] {section}".strip() if page else section,

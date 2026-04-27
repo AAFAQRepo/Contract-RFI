@@ -105,6 +105,7 @@ class Chunk(Base):
     clause_type = Column(String, nullable=True)        # e.g. "penalty" (analysis chunks)
     page = Column(Integer, nullable=True)
     language = Column(String, nullable=True)
+    chunk_index = Column(Integer, nullable=True)        # Sequential index for neighbor expansion
     token_count = Column(Integer, nullable=True)
     qdrant_point_id = Column(String, nullable=True)    # links to Qdrant vector
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -116,6 +117,7 @@ class Chunk(Base):
         Index("idx_chunks_document_id", "document_id"),
         Index("idx_chunks_chunk_type", "chunk_type"),
         Index("idx_chunks_clause_type", "clause_type"),
+        Index("idx_chunks_doc_index", "document_id", "chunk_index"),
     )
 
 

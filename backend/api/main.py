@@ -32,6 +32,20 @@ async def seed_dummy_user():
         await db.commit()
         print(f"✅ User {email} seeded/updated")
 
+async def auto_migrate():
+    """Ensure the database schema has the required columns for the RAG Evolution."""
+    async with async_session() as db:
+        print("🛠️ Running auto-migrations...")
+        try:
+            # Add chunk_index to chunks if it doesn't exist
+            await db.execute(text("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS chunk_index INTEGER;"))
+            # Add thinking to chats if it doesn't exist
+            await db.execute(text("ALTER TABLE chats ADD COLUMN IF NOT EXISTS thinking TEXT;"))
+            await db.commit()
+            print("✅ Database schema is up to date.")
+        except Exception as e:
+            print(f"⚠️ Auto-migration failed (this is expected if already applied): {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize service connections on startup."""
@@ -39,6 +53,7 @@ async def lifespan(app: FastAPI):
     init_minio()
     init_qdrant()
     await init_redis()
+    await auto_migrate()
     await seed_dummy_user()
     print("✅ All services connected")
     yield

@@ -8,25 +8,25 @@ from services.retrieval import RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are 'Contract AI', a precise Legal AI Assistant specialized in contract analysis and RFI responses.
+SYSTEM_PROMPT = """You are 'Contract AI', a precise Legal AI Assistant.
 
-STRICT GROUNDING RULES:
-1.  **Context-Only**: Your answer must be based EXCLUSIVELY on the provided "CONTEXT FROM DOCUMENTS". 
-2.  **Refusal Mode**: If the answer is not present in the context, or the evidence is insufficient, explicitly state: "I am sorry, but the provided documents do not contain enough information to answer [query]."
-3.  **Citations**: Cite every factual claim using: [Document: Filename, Page: X]. Place citations next to the specific detail.
-4.  **Extractive Accuracy**: For legal clauses, stay very close to the source wording.
-5.  **General Mode**: If no documents are linked yet, greet the user naturally and explain your specific capabilities (Contract Analysis, Risk Detection, RFI Support). Use your general legal knowledge to explain concepts, but state that you need a contract to provide specific analysis.
+### CRITICAL INSTRUCTION:
+EVERY response must begin with an internal reasoning block wrapped in `<thinking>...</thinking>` tags. 
 
-RESPONSE STRUCTURE:
-You must follow this EXACT structure for every response:
-1.  **Thinking Block**: Open with `<thinking>`. Inside, perform your internal "Critique" and plan your answer. Match facts to sources. 
-    - **CRITICAL**: The thinking block is for YOUR INTERNAL LOGIC ONLY. Do NOT write your final greeting or final answer here.
-2.  **Final Answer**: Close the thinking block with `</thinking>`. Then, on a new line, provide your direct, professional response to the user in Markdown format.
+### RESPONSE STRUCTURE:
+1.  **Reasoning**: `<thinking> [Your internal logic, source verification, and critique] </thinking>`
+2.  **Answer**: [Your final professional answer to the user in Markdown format]
 
-SELF-VERIFICATION PROTOCOL (Inside <thinking>):
-- List factual claims.
-- Match each to a specific SOURCE in the context.
-- If no direct support exists, remove the claim or trigger Refusal Mode.
+### GROUNDING RULES:
+1.  **Context-Only**: Use PROVIDED CONTEXT for project-specific facts.
+2.  **Refusal**: If context is missing/insufficient, say: "I am sorry, but the provided documents do not contain enough information to answer [query]."
+3.  **Citations**: Use `[Document: Filename, Page: X]` next to every factual claim.
+4.  **General Interaction**: If no documents are uploaded, you may answer general legal questions or greet the user. Only greet the user if they greet you or if it is the very first message. Avoid repeating "Hello" in every turn.
+
+### SELF-VERIFICATION (Inside <thinking>):
+- Plan the answer.
+- Verify every claim against the context.
+- Ensure the final answer is placed OUTSIDE the </thinking> tag.
 """
 
 USER_PROMPT_TEMPLATE = """USER NAME: {user_name}
@@ -52,14 +52,13 @@ class LLMService:
     def _format_context(self, chunks: List[RetrievedChunk]) -> str:
         """Combine multiple chunks into context string with clear source markers."""
         if not chunks:
-            return "GENERAL MODE: No documents linked yet. Answer greetings or general legal questions using your internal knowledge, but do not hallucinate details about specific user projects."
+            return "GENERAL MODE: No documents linked. Answer greetings or general legal questions only."
             
         context_parts = []
         for i, chunk in enumerate(chunks, 1):
             part = (
                 f"SOURCE [{i}]:\n"
                 f"Filename: {chunk.filename}\n"
-                f"Section: {chunk.section or 'N/A'}\n"
                 f"Page: {chunk.page}\n"
                 f"Content: {chunk.text}\n"
                 f"--------------------------"
@@ -91,7 +90,7 @@ class LLMService:
                     {"role": "user", "content": user_content},
                 ],
                 stream=True,
-                temperature=0.4, # Improved variance for natural flow
+                temperature=0.1, # Maximum instruction following
                 max_tokens=2048,
             )
 

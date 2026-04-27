@@ -38,12 +38,16 @@ export default function ThinkingBlock({ thinking, isDone }) {
 
   return (
     <div className={`thinking-block ${isDone ? 'is-done' : ''}`}>
-      <button className="thinking-toggle" onClick={() => setOpen(v => !v)}>
+      <button 
+        className="thinking-toggle" 
+        onClick={() => thinking && setOpen(v => !v)}
+        style={{ cursor: thinking ? 'pointer' : 'default' }}
+      >
         <span className={`thinking-dot-anim ${isDone ? 'stopped' : ''}`}></span>
-        <span>{isDone ? 'Thought process' : 'Thinking'}</span>
-        <span className={`thinking-chevron ${open ? 'open' : ''}`}></span>
+        <span>{isDone ? 'Thought process' : (thinking ? 'Thinking' : 'Initializing…')}</span>
+        {thinking && <span className={`thinking-chevron ${open ? 'open' : ''}`}></span>}
       </button>
-      {open && (
+      {open && thinking && (
         <div className="thinking-content">
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
             {renderedThinking}

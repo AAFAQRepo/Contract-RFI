@@ -25,9 +25,10 @@ export default function ThinkingBlock({ thinking, isDone }) {
     }
   }, [isDone])
 
-  if (!thinking) return null
+  // Don't show anything if it's both empty AND done (e.g. legacy messages without thinking)
+  if (!thinking && isDone) return null
 
-  const renderedThinking = thinking.split('\n').map((line, i) => {
+  const renderedThinking = (thinking || '').split('\n').map((line, i) => {
     const t = line.trim()
     if (t.startsWith('-') || t.startsWith('*')) {
       return <li key={i} style={{ marginBottom: 4 }}>{t.substring(1).trim()}</li>

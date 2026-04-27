@@ -156,6 +156,7 @@ async def chat_message(
             document_id=payload.document_ids[0] if payload.document_ids else None,
             query=payload.query,
             answer=final_answer,
+            thinking=final_thinking,
             sources=[{"document_id": c.document_id, "page": c.page, "text": c.text[:200]} for c in chunks],
             latency_ms=latency_ms,
             cache_hit=False
@@ -231,7 +232,7 @@ async def chat_history(
             id=str(c.id),
             query=c.query or "",
             answer=c.answer,
-            thinking="", 
+            thinking=c.thinking or "", 
             sources=[SourceChunk(**s) for s in (c.sources or [])],
             created_at=c.created_at.isoformat()
         )

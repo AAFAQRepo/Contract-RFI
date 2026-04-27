@@ -82,7 +82,14 @@ export default function ChatPage() {
         const flattened = []
         r.data.forEach(c => {
           if (c.query) flattened.push({ id: `q-${c.id}`, role: 'user', text: c.query })
-          if (c.answer) flattened.push({ id: `a-${c.id}`, role: 'ai', text: c.answer, sources: c.sources })
+          if (c.answer) flattened.push({ 
+            id: `a-${c.id}`, 
+            role: 'ai', 
+            text: c.answer, 
+            thinking: c.thinking || '', 
+            isThinkingDone: true,
+            sources: c.sources 
+          })
         })
         setMessages(flattened)
       })
@@ -389,16 +396,6 @@ export default function ChatPage() {
                       sources={msg.sources} 
                       isStreaming={msg.isStreaming} 
                     />
-              )}
-              {sending && messages[messages.length - 1]?.role !== 'ai' && (
-                <div className="msg-ai">
-                  <div className="thinking-block" style={{ pointerEvents: 'none' }}>
-                    <div className="thinking-toggle" style={{ cursor: 'default' }}>
-                      <span className="thinking-dot-anim"></span>
-                      <span>Thinking…</span>
-                    </div>
-                  </div>
-                </div>
               )}
               <div ref={messagesEndRef} />
             </div>

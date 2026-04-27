@@ -164,6 +164,7 @@ class Chat(Base):
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True)
     query = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)
+    thinking = Column(Text, nullable=True)             # Persisted AI reasoning
     sources = Column(JSONB, default=list)               # [{chunk_id, section, page, text_snippet}]
     intent = Column(String, nullable=True)              # simple_qa, summary, risk
     route = Column(String, nullable=True)               # hybrid_rag, cache, bm25

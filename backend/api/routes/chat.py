@@ -75,8 +75,9 @@ async def chat_message(
         chunks.extend(doc_chunks)
 
     # Re-rank combined results by score, keep top TOTAL_TOP_K seeds
-    # We pick the top 8 'seed' chunks and then expand them.
-    SEED_TOP_K = 8
+    # We pick the top 20 'seed' chunks and then expand them.
+    # Increasing this ensures better recall for exhaustive lists.
+    SEED_TOP_K = 50
     seeds = sorted(chunks, key=lambda c: getattr(c, 'score', 0), reverse=True)[:SEED_TOP_K]
 
     # 2. Adjacent Chunk Expansion (Industry Standard for long-form documents)

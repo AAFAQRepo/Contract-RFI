@@ -53,5 +53,7 @@ httpx>=0.25.0
 python-jose[cryptography]==3.3.0
 bcrypt==5.0.0
 stripe>=6.0.0
-slowapi>=0.1.9
-aiosmtplib>=3.0.0
+# ── RAG Evaluation (Ragas) ──
+ragas>=0.3.0
+datasets>=3.0.0
+langchain-openai>=0.1.0

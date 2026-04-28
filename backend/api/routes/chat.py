@@ -1,6 +1,6 @@
 import time
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,12 +10,14 @@ from core.auth import get_current_user
 from models.models import User, Chat
 from services.retrieval import HybridRetriever, RetrievedChunk
 from services.llm import LLMService
+from services.evaluation import EvaluationService
 
 from core.limits import check_usage_limit, increment_usage
 
 router = APIRouter()
 retriever = HybridRetriever()
 llm_service = LLMService()
+eval_service = EvaluationService()
 
 # ── Models ──────────────────────────────────────────────────────────────────
 
@@ -46,6 +48,7 @@ import asyncio
 @router.post("/message")
 async def chat_message(
     payload: ChatQuery,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _limit: bool = Depends(check_usage_limit("queries")),
@@ -164,6 +167,16 @@ async def chat_message(
         )
         db.add(new_chat)
         await db.commit()
+
+        # 4. Trigger Background Evaluation (Ragas)
+        # Audit the accuracy, faithfulness, and relevancy of this response.
+        background_tasks.add_task(
+            eval_service.background_evaluate_and_save,
+            chat_id=str(new_chat.id),
+            query=payload.query,
+            answer=final_answer,
+            chunks=chunks
+        )
 
         # Increment usage
         await increment_usage(current_user.org_id, "queries", db)

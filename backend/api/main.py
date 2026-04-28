@@ -41,6 +41,9 @@ async def auto_migrate():
             await db.execute(text("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS chunk_index INTEGER;"))
             # Add thinking to chats if it doesn't exist
             await db.execute(text("ALTER TABLE chats ADD COLUMN IF NOT EXISTS thinking TEXT;"))
+            # Add Ragas scores
+            await db.execute(text("ALTER TABLE chats ADD COLUMN IF NOT EXISTS faithfulness_score FLOAT;"))
+            await db.execute(text("ALTER TABLE chats ADD COLUMN IF NOT EXISTS relevancy_score FLOAT;"))
             await db.commit()
             print("✅ Database schema is up to date.")
         except Exception as e:

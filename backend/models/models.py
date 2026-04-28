@@ -166,6 +166,8 @@ class Chat(Base):
     answer = Column(Text, nullable=False)
     thinking = Column(Text, nullable=True)             # Persisted AI reasoning
     sources = Column(JSONB, default=list)               # [{chunk_id, section, page, text_snippet}]
+    faithfulness_score = Column(Float, nullable=True)  # Ragas: Groundedness
+    relevancy_score = Column(Float, nullable=True)     # Ragas: Answer Relevancy
     intent = Column(String, nullable=True)              # simple_qa, summary, risk
     route = Column(String, nullable=True)               # hybrid_rag, cache, bm25
     latency_ms = Column(Integer, nullable=True)
